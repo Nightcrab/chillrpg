@@ -14,6 +14,8 @@ def genID(size=8, chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".split()):
 
 class Player:
     def __init__(self, info):
+    	self.ai = AI()
+    	self.isPlayer = True
         for key in info:
             setattr(self, key, info[key])
 
@@ -38,27 +40,35 @@ class Item:
             setattr(self, key, kwargs[key])
 
 class AI:
-    def __init__(self, defend=None, attack=None):
+    def __init__(self, defend=None, action=None):
         if defend == None:
             def defend(self, weapon, attack):
-                t_table = {
+                stab_table = {
                 "la" : "mr",
                 "ra" : "ml",
                 "t" : "pl",
                 "h" : "pr"
                 }
-                s_table = {
+                strike_table = {
                 "la" : "pl",
                 "ra" : "pr",
                 "t" : "pu",
                 "h" : "pl"
                 }
                 if attack.type == "stab":
-                    return Defense(s_table[attack.target])
+                    return Defense(stab_table[attack.target])
+                else if attack.type == "strike":
+                    return Defense(strike_table[attack.target])
+            self.defend = defend
+        if action == None:
+        	def action(self, env):
+        		return random.choice(["stab", "strike"])
+        	self.action = action
 
 class Enemy:
     def __init__(self, info, ai=None):
         self.info = info
+        self.isPlayer = False
 
         if ai == None:
             self.ai = AI()
@@ -95,6 +105,7 @@ class Fight:
     def __init__(self, player1, player2):
         self.p1 = player1
         self.p2 = player2
+    async def turn(self):
 
 class ChillRPG:
     """Class holding game information, methods and player interaction."""
