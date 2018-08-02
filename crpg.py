@@ -14,8 +14,8 @@ def genID(size=8, chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".split()):
 
 class Player:
     def __init__(self, info):
-    	self.ai = AI()
-    	self.isPlayer = True
+        self.ai = AI()
+        self.isPlayer = True
         for key in info:
             setattr(self, key, info[key])
 
@@ -57,13 +57,13 @@ class AI:
                 }
                 if attack.type == "stab":
                     return Defense(stab_table[attack.target])
-                else if attack.type == "strike":
+                elif attack.type == "strike":
                     return Defense(strike_table[attack.target])
             self.defend = defend
         if action == None:
-        	def action(self, env):
-        		return random.choice(["stab", "strike"])
-        	self.action = action
+            def action(self, env):
+                return random.choice(["stab", "strike"])
+            self.action = action
 
 class Enemy:
     def __init__(self, info, ai=None):
@@ -97,16 +97,18 @@ class Attack:
 
 class Defense:
     """Determines the effectiveness of an attack."""
-    def __init__(self, action, weapon, stance):
+    def __init__(self, player, weapon, stance):
         self.type = player.ai.defend(player.weapon, attack)
 
 class Fight:
     """Created whenever a player enters a fight."""
-    def __init__(self, player1, player2):
+    def __init__(self, player1, player2, bot, channel):
         self.p1 = player1
         self.p2 = player2
+        self.bot = bot
+        self.channel = channel
     async def turn(self):
-
+        return
 class ChillRPG:
     """Class holding game information, methods and player interaction."""
     def __init__(self, bot):
@@ -148,6 +150,7 @@ class ChillRPG:
         fileIO("data/crpg/players/{}/info.json".format(ID), "save", info)
 
         await self.bot.send_message(channel, "Welcome to character creation.")
+        info["ID"] = ID
         info["name"] = await self.promptUser(user, channel, "What will your name be?")
         info["age"] = await self.promptUser(user, channel, "How old are you (in years)?")
         info["gender"] = await self.promptUser(user, channel, "What will your gender be?")
@@ -184,7 +187,7 @@ class ChillRPG:
     def status(self, player):
         embed = discord.Embed(title="{}'s Status".format(player.name), color=0x16ff64)
         embed.add_field(name="Stats", value="Health:{}\nStamina:{}\nFatigue:{}\nLevel:{}\nBalance:{}\n".format(player.HP, player.stamina, player.fatigue, player.level, player.balance), inline=False)
-        embed.add_field(name="Location", value="{}".format(self.locations[player.location].description), inline=False)
+        embed.add_field(name="Location", value="{}".format(self.locations[player.location]["description"]), inline=False)
         return embed
 
     @commands.command(pass_context=True)
