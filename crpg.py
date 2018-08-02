@@ -121,8 +121,8 @@ class Fight:
         self.rpg = chillrpg
         self.channel = channel
 
-    async def start(self):
-        description = "you're in a fight, defend yourself m8"
+    def updatemsg(self):
+    	description = "you're in a fight, defend yourself m8"
         embed = discord.Embed(title="{} vs {}".format(self.p1.name, self.p2.name), description=description, color=0x16ff64)
         embed.add_field(title="Stances", value="{}'s stance:{}\n{}'s stance:".format(self.p1.stance, self.p2.stance), inline=False)
         
@@ -132,7 +132,10 @@ class Fight:
         if self.p2.isPlayer:
             h2 = self.p2.health
             embed.add_field(title="{}'s' Health".format(self.p2.name), value="HP: {}\nHead: {}\nTorso: {}\nLeft Arm: {}\nRight Arm: {}\nLeft Leg: {}\nRight Leg: {}\n".format(h2.HP, h2.h, h2.t, h2.la, h2.ra, h2.ll, h2.rl), inline=False)
-        self.message = await self.rpg.bot.send_message(self.channel, embed=embed)
+        return embed
+
+    async def start(self):
+    	self.message = await self.rpg.bot.send_message(self.channel, embed=self.updatemsg())
         self.nextTurn()
 
     async def resolveAttack(self, attack, defense, attacker, defender):

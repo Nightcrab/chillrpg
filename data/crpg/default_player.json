@@ -20,5 +20,5 @@
 	"stance": "neutral",
 	"inv": [],
 	"mass": 80,
-	"Location" : "chillbar"
+	"location" : "chillbar"
 }
