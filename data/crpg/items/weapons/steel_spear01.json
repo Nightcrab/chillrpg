@@ -1,0 +1,17 @@
+{
+	"name":"Steel Spear",
+	"type":"polearm",
+	"length":3,
+	"mass": 2.1,
+	"balance":15,
+	"blade": {
+		"mass": 1.1,
+		"stab": {
+			"area" : 1,
+			"sharpness" : 60
+		}
+	},
+	"attacks": {
+		"stab":"Thrust"
+	}
+}

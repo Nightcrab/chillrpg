@@ -1,0 +1,14 @@
+{
+	"HP" : 100,
+	"stamina" : 100,
+	"fatigue" : 0,
+	"level" : 0,
+	"balance" : 0,
+	"strength": {
+		"arm": 10,
+		"legs": 10
+	},
+	"inv": [],
+	"mass": 80,
+	"Location" : "chillbar"
+}

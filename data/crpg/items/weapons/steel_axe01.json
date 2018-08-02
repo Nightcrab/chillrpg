@@ -1,0 +1,22 @@
+{
+	"name":"Steel Axe",
+	"type":"polearm",
+	"length":1.1,
+	"mass": 3,
+	"balance":20,
+	"blade": {
+		"mass": 2,
+		"stab" : {
+			"area" : 10,
+			"sharpness" : 1
+		},
+		"strike" : {
+			"area" : 5,
+			"sharpness" : 50
+		}
+	},
+	"attacks": {
+		"stab":"Thrust",
+		"strike":"Chop"
+	}
+}

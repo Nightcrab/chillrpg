@@ -1,0 +1,21 @@
+{
+	"name":"Steel Sword",
+	"type":"sword",
+	"length":0.9,
+	"mass": 1.1,
+	"balance":50,
+	"blade": {
+		"mass": 1,
+		"stab" : {
+			"area" : 2,
+			"sharpness" : 50
+		},
+		"strike" : {
+			"sharpness" : 60
+		}
+	},
+	"attacks": {
+		"stab":"Thrust",
+		"strike":"Cut"
+	}
+}
