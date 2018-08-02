@@ -8,6 +8,7 @@
 		"arm": 10,
 		"legs": 10
 	},
+	"stance": "neutral",
 	"inv": [],
 	"mass": 80,
 	"Location" : "chillbar"

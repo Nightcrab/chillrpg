@@ -37,24 +37,58 @@ class Item:
         for key in kwargs:
             setattr(self, key, kwargs[key])
 
+class AI:
+    def __init__(self, defend=None, attack=None)
+        if defend == None:
+            def defend(self, weapon, attack):
+                t_table = {
+                "la" : "mr",
+                "ra" : "ml",
+                "t" : "pl",
+                "h" : "pr"
+                }
+                s_table = {
+                "la" : "pl",
+                "ra" : "pr",
+                "t" : "pu",
+                "h" : "pl"
+                }
+                if attack.type == "stab":
+                    return Defense(s_table[attack.target])
+
 class Enemy:
     def __init__(self, info, ai=None):
         self.info = info
 
         if ai == None:
-            def base_ai(fight):
-                return random.choice(self.info.attacks)
-            self.ai = base_ai
+            self.ai = AI()
         else:
             self.ai = ai
 
 class Attack:
     """An attack, usually countered with a defense."""
-    def __init__(self, player, weapon):
-        self.acceleration = 2*pi*weapon.length
+    def __init__(self, player, distance, weapon, atktype, target):
+        self.type = atktype
+        self.stance = player.stance
+        self.target = target
+        self.distance = distance
+        self.weapon = weapon
+        if atktype == "stab":
+            self.damage = weapon.blade.mass*player.strength.arm*weapon.blade.stab.sharpness/weapon.blade.stab.area
+
+        # more advanced combat system for future implementation
+        if atktype == "strike":
+            acceleration = player.strength/weapon.mass
+            self.velocity = player.
+            if weapon.type == sword:
+                self.attack_area = weapon.length - distance
+            else:
+                self.attack_area = weapon.blade.strike.area
 
 class Defense:
     """Determines the effectiveness of an attack."""
+    def __init__(self, action, weapon, stance):
+        self.type = await player.ai(attack)
 
 class Fight:
     """Created whenever a player enters a fight."""

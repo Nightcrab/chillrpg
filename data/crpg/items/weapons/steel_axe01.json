@@ -6,6 +6,7 @@
 	"balance":20,
 	"blade": {
 		"mass": 2,
+		"length":0.2,
 		"stab" : {
 			"area" : 10,
 			"sharpness" : 1
