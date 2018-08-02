@@ -38,7 +38,7 @@ class Item:
             setattr(self, key, kwargs[key])
 
 class AI:
-    def __init__(self, defend=None, attack=None)
+    def __init__(self, defend=None, attack=None):
         if defend == None:
             def defend(self, weapon, attack):
                 t_table = {
@@ -79,7 +79,7 @@ class Attack:
         # more advanced combat system for future implementation
         if atktype == "strike":
             acceleration = player.strength/weapon.mass
-            self.velocity = player.
+            self.velocity = acceleration * distance
             if weapon.type == sword:
                 self.attack_area = weapon.length - distance
             else:
@@ -88,7 +88,7 @@ class Attack:
 class Defense:
     """Determines the effectiveness of an attack."""
     def __init__(self, action, weapon, stance):
-        self.type = await player.ai(attack)
+        self.type = player.ai.defend(player.weapon, attack)
 
 class Fight:
     """Created whenever a player enters a fight."""
@@ -167,19 +167,23 @@ class ChillRPG:
     def listItems(self, inv):
         content = ""
         for item in inv:
-            content += "{} x {}".format(item.name, item.amount)
+            content += "\n{} x {}".format(item.name, item.amount)
+        return content
 
     def status(self, player):
         embed = discord.Embed(title="{}'s Status".format(player.name), color=0x16ff64)
         embed.add_field(name="Stats", value="Health:{}\nStamina:{}\nFatigue:{}\nLevel:{}\nBalance:{}\n".format(player.HP, player.stamina, player.fatigue, player.level, player.balance), inline=False)
-        embed.add_field(name="Inventory", value=self.listItems(player.inventory), inline=False)
         embed.add_field(name="Location", value="{}".format(self.locations[player.location].description), inline=False)
         return embed
 
     @commands.command(pass_context=True)
+    async def inventory(self, ctx):
+        embed = discord.Embed(title="Inventory", description=self.listItems(self.getPlayer(ctx.message.author.id)), color=0x16ffeb)
+        await self.bot.send_message(ctx.message.channel, embed=embed)
+    @commands.command(pass_context=True)
     async def begin(self, ctx):
         if os.path.isdir("data/crpg/players/{}".format(ctx.message.author.id)):
-            confirm = await promptUser(ctx.message.author, ctx.message.channel, "Are you sure you wish to recreate your character? Your old one will become deceased and irretrievable.")
+            confirm = await self.promptUser(ctx.message.author, ctx.message.channel, "Are you sure you wish to recreate your character? Your old one will become deceased and irretrievable.")
             if confirm.lower() in self.yes:
                 shutil.rmtree("data/crpg/players/{}".format(ctx.message.author.id))
             else:
