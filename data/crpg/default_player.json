@@ -1,11 +1,20 @@
 {
-	"HP" : 100,
+	"health" : {
+        "HP" : 100,
+        "bleed":0,
+        "h" : 100,
+        "t" : 100,
+        "la" : 100,
+        "ra" : 100,
+        "ll" : 100,
+        "rl" : 100
+	},
 	"stamina" : 100,
 	"fatigue" : 0,
 	"level" : 0,
 	"balance" : 0,
 	"strength": {
-		"arm": 10,
+		"arm": 10, 
 		"legs": 10
 	},
 	"stance": "neutral",
