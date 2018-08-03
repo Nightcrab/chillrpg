@@ -9,6 +9,18 @@
         "ll" : 100,
         "rl" : 100
 	},
+	"proportions": {
+		"height": 1.6,
+		"arm": 0.8
+	},
+	"wounds" : [
+	],
+	"buffs" : {
+		"reaction" : 1
+	},
+	"combat_stats": {
+		"reactionspeed" : 500
+	},
 	"stamina" : 100,
 	"fatigue" : 0,
 	"level" : 0,
@@ -17,7 +29,6 @@
 		"arm": 10, 
 		"legs": 10
 	},
-	"stance": "neutral",
 	"inv": [],
 	"mass": 80,
 	"location" : "chillbar"

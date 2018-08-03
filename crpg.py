@@ -9,7 +9,6 @@ import pickle
 import re
 import math
 
-
 def genID(size=8, chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".split()):
     return ''.join(random.choice(chars) for _ in range(size))
 
@@ -19,6 +18,20 @@ def savePickle(filename, obj):
 def loadPickle(filename):
     filehandler = open(filename, 'rb')
     return pickle.load(filehandler)
+
+def sigmoid(x, deriv=False):
+    if(deriv==True):
+        return x*(1-x)
+    return 1/(1+math.exp(-x))
+
+name = {
+      "h" :  "head",
+      "t" :  "torso",
+      "la":  "left arm",
+      "ra": "right arm",
+      "ll": "left leg",
+      "rl": "right leg"
+      }
 pos = {
       "h" :  [0,1],
       "t" :  [0,0],
@@ -26,6 +39,14 @@ pos = {
       "ra": [-1,0],
       "ll": [1,-1],
       "rl":[-1,-1]
+      }
+size = {
+      "h" :  0.06,
+      "t" :  0.3,
+      "la":  0.1,
+      "ra": 0.1,
+      "ll": 0.15,
+      "rl": 0.15
       }
 
 def distance(pos1, pos2):
@@ -39,28 +60,67 @@ def distance(pos1, pos2):
     return math.sqrt(d1*d1+(z2 - z1)*(z2 - z1))
 
 class Player:
-    def __init__(self, info):
-        self.ai = AI()
-        self.isPlayer = True
+    def __init__(self, info, isPlayer=True):
+        self.ai = AI(self)
+        self.weapon = Item("steel_spear01", {"amount":1})
+        self.isPlayer = isPlayer
         for key in info:
             setattr(self, key, info[key])
+        if not "stance" in info:
+            self.stance = Stance(self, [0,0,0,0])
+        if not "armour" in info:
+            self.armour = {
+            "h" : Item("skin", {"amount":1}),
+            "t" : Item("skin", {"amount":1}),
+            "la" : Item("skin", {"amount":1}),
+            "ra" : Item("skin", {"amount":1}),
+            "ll" : Item("skin", {"amount":1}),
+            "rl" : Item("skin", {"amount":1}),
+            }
+        self.ai = AI(self)
 
     def isDead(self):
-        if self.health.h <= 0:
+        if self.health["h"] <= 0:
             return True
-        if self.health.HP <= 0:
+        if self.health["HP"] <= 0:
             return True
         return False
 
     def changeEquip(self, itemname):
         matches = [item for item in self.inv if item.name.lower() == itemname.lower()] 
+        print(itemname)
         if len(matches) > 0:
             self.weapon = matches[0]
         else:
             self.weapon = [item for item in self.inv if item.name.lower() == "fists"][0]
+        self.save()
 
-    async def save(self):
-        savePickle("data/crpg/players/{}/info.obj".format(self.ID), self)
+    def applyDamage(self, wound):
+        if wound == None:
+            return
+        if wound.type == "blunt":
+            self.health[wound.location] -= wound.value
+        else:
+            self.wounds.append(wound)
+        self.save()
+
+    def listWounds(self):
+        content = ""
+        for x in self.wounds:
+            content += "{} on {}\n".format(x.type, name[x.location])
+        return content
+
+    def invmass(self):
+        s = 0
+        for x in self.inv:
+            s += x.mass
+        return s
+
+    def save(self):
+        if not self.isPlayer:
+            savePickle("data/crpg/npcs/{}/info.obj".format(self.ID), self)
+        else:
+            savePickle("data/crpg/players/{}/info.obj".format(self.ID), self)
 
 class Item:
     def __init__(self, itemID, *info, **kwargs):
@@ -80,8 +140,8 @@ class Item:
             setattr(self, key, kwargs[key])
 
 class AI:
-    def __init__(self, defend=None, action=None):
-        return
+    def __init__(self, player, defend=None, action=None):
+        self.player = player
     def defend(self, weapon, attack):
         stab_table = {
         "la" : "mr", #left arm, move right
@@ -96,9 +156,9 @@ class AI:
         "h" : "pl"
         }
         if attack.type == "stab":
-            return Defense(stab_table[attack.target])
+            return stab_table[attack.target]
         elif attack.type == "strike":
-            return Defense(strike_table[attack.target])
+            return strike_table[attack.target]
     def action(self, env):
         return random.choice(["stab ", "strike "])+random.choice(["h","t"])
 
@@ -113,11 +173,12 @@ class Enemy:
             self.ai = ai
 
 class Stance:
-    def __init__(self, player, string):
-        self.code = string.split("")
-        self.x = int(code[0])*0.3 #-1 left 0 middle 1 right
-        self.y = int(code[1])*0.7 #-1 bottom 0 middle 1 top
-        self.z = int(code[2])*player.proportions["arm"]/3 #0 close 1 neutral 2 forward 3 overextended
+    def __init__(self, player, code):
+        self.x = code[0]*0.3 #-1 left 0 middle 1 right
+        self.y = code[1]*0.7 #-1 bottom 0 middle 1 top
+        self.z = code[2]*player.proportions["arm"]/3 #0 close 1 neutral 2 forward 3 overextended
+        self.line = code[3]
+        self.name = str(code)
 
     def lungelen(self):
         return 0
@@ -136,29 +197,31 @@ class Attack:
         self.type = atktype
         self.stance = player.stance
         self.target = target
-        self.dz = p_distance - self.stance.z
-        self.dx = self.stance.x - pos[target][0]
-        self.dy = self.stance.y - pos[target][1]
-        self.d1 = math.sqrt(dx*dx+dy*dy)
+        dz = p_distance - self.stance.z
+        dx = self.stance.x - pos[target][0]
+        dy = self.stance.y - pos[target][1]
+        d1 = math.sqrt(dx*dx+dy*dy)
         self.distance = math.sqrt(dz*dz+d1*d1)
 
         self.weapon = weapon
         if atktype == "stab":
-            w_acceleration = player.strength.arm/weapon.mass
-            b_acceleration = player.strength.leg/(player.mass+player.invmass+weapon.mass)
+            w_acceleration = player.strength["arm"]/weapon.mass
+            b_acceleration = player.strength["legs"]/(player.mass+player.invmass()+weapon.mass)
             self.velocity = math.sqrt(2*w_acceleration*self.distance)
             self.velocity += math.sqrt(2*b_acceleration*self.stance.lungelen())
             self.acceleration = w_acceleration + b_acceleration
             self.attack_area = weapon.blade["stab"]["area"]
         
         if atktype == "strike":
-            self.acceleration = player.strength.arm/weapon.mass
-            self.velocity = math.sqrt(2*acceleration*self.distance)
-            if weapon.type == sword:
-                self.attack_area = weapon.length - distance
+            self.acceleration = player.strength["arm"]/weapon.mass
+            self.velocity = math.sqrt(2*self.acceleration*self.distance)
+            overlap = self.weapon.blade["length"] - self.distance
+            if self.weapon.blade["strike"]["area"] > overlap:
+                self.attack_area = overlap
             else:
-                self.attack_area = weapon.blade["strike"]["area"]
-        self.energy = 1/2*mass*velocity*velocity
+                self.attack_area = self.weapon.blade["strike"]["area"]
+        self.energy = 1/2*self.weapon.blade["mass"]*self.velocity*self.velocity
+        self.momentum = self.weapon.blade["mass"]*self.velocity
 
 class Defense:
     """Determines the effectiveness of an attack."""
@@ -166,9 +229,25 @@ class Defense:
         self.type = player.ai.defend(player.weapon, attack)
         self.weapon =  weapon
         self.stance = stance
-        self.reaction = player.combat_stats.reactionspeed*player.buffs.reaction
+        self.reaction = player.combat_stats["reactionspeed"]*player.buffs["reaction"]
         if self.type == "b":
-            self.destination = pos[attack.target]
+            self.destination = pos[attack.target]+[0]
+
+class Wound:
+    def __init__(self, _type, location, value, text):
+        self.type = _type
+        self.value = value
+        self.location = location
+        self.text = text
+
+    def severity(self):
+        if self.type == "cut":
+            if self.value[0] > 0.2 or self.value[1] > 0.1:
+                return "severe"
+        elif self.type == "stab":
+            if self.value > 0.2:
+                return "severe"
+        return "mild"
 
 class Fight:
     """Created whenever a player enters a fight."""
@@ -179,64 +258,86 @@ class Fight:
         self.p2.pos = 2
         self.rpg = chillrpg
         self.channel = channel
+        print(channel)
+        print(self.p1.stance)
+        print(self.p2.stance)
         self.turns = ["The battle began between {} and {}.".format(self.p1.name, self.p2.name)]
 
     def updatemsg(self):
         description = "you're in a fight, defend yourself m8"
         embed = discord.Embed(title="{} vs {}".format(self.p1.name, self.p2.name), description=description, color=0x16ff64)
-        embed.add_field(title="Stances", value="{}'s stance:{}\n{}'s stance:".format(self.p1.stance, self.p2.stance), inline=False)
+        embed.add_field(name="Stances", value="{}'s stance:{}\n{}'s stance:{}".format(self.p1.name, self.p1.stance.name, self.p2.name, self.p2.stance.name), inline=False)
         
         if self.p1.isPlayer:
-            h1 = self.p1.health
-            embed.add_field(title="{}'s' Health".format(self.p1.name), value="HP: {}\nHead: {}\nTorso: {}\nLeft Arm: {}\nRight Arm: {}\nLeft Leg: {}\nRight Leg: {}\n".format(h1.HP, h1.h, h1.t, h1.la, h1.ra, h1.ll, h1.rl), inline=False)
+            h1 = self.p1.health    
+            embed.add_field(name="{}'s Health".format(self.p1.name), value="HP: {}\nHead: {}\nTorso: {}\nLeft Arm: {}\nRight Arm: {}\nLeft Leg: {}\nRight Leg: {}\n".format(str(h1["HP"]), str(h1["h"]), str(h1["t"]), str(h1["la"]), str(h1["ra"]), str(h1["ll"]), str(h1["rl"])), inline=True)
+            embed.add_field(name="{}'s Wounds".format(self.p1.name), value=self.p1.listWounds(), inline=True)
+        #embed.add_field(name=" ",value=" ",inline=False)
         if self.p2.isPlayer:
             h2 = self.p2.health
-            embed.add_field(title="{}'s' Health".format(self.p2.name), value="HP: {}\nHead: {}\nTorso: {}\nLeft Arm: {}\nRight Arm: {}\nLeft Leg: {}\nRight Leg: {}\n".format(h2.HP, h2.h, h2.t, h2.la, h2.ra, h2.ll, h2.rl), inline=False)
-        embed.add_field(title="Battle Log", value="\n".join(self.turns), inline=False)
+            embed.add_field(name="{}'s Health".format(self.p2.name), value="HP: {}\nHead: {}\nTorso: {}\nLeft Arm: {}\nRight Arm: {}\nLeft Leg: {}\nRight Leg: {}\n".format(str(h2["HP"]), str(h2["h"]), str(h2["t"]), str(h2["la"]), str(h2["ra"]), str(h2["ll"]), str(h2["rl"])), inline=True)
+            embed.add_field(name="{}'s Wounds".format(self.p2.name), value=self.p2.listWounds(), inline=True)
+        embed.add_field(name="Battle Log", value="\n".join(self.turns), inline=False)
         return embed
 
     async def start(self):
         self.message = await self.rpg.bot.send_message(self.channel, embed=self.updatemsg())
-        self.nextTurn()
+        await self.nextTurn()
 
     async def resolveAttack(self, attack, defense, attacker, defender):
         def success(attack, defense):
             return True
         def calcDamage(attack, armour):
-            pressure = attack.weapon.blade[attack.type]["sharpness"]/100*attacker.strength.arm/attack.weapon.blade[attack.type]["area"] # sharpness applied as a multiplier of pressure, effectively dividing the impact area and thus increasing the imapct pressure
-            cut_factor = attack.attack_area*attack.velocity/attack.stance.z
+            if attack.weapon.blade[attack.type]["area"] == 0:
+                damage = Wound("blunt", name[attack.target], attack.weapon.mass-attack.weapon.blade["mass"], "{} hit {} with the handle of their weapon!".format(attacker.name, defender.name))
+                attacker.stance = Stance(defender, pos[attack.target]+[2, 1])
+                return damage
+            pressure = attack.weapon.blade[attack.type]["sharpness"]/100*attacker.strength["arm"]/attack.weapon.blade[attack.type]["area"] # sharpness applied as a multiplier of pressure, effectively dividing the impact area and thus increasing the imapct pressure
+            if pressure > armour.cut_threshold:
+                if attack.type == "strike":
+                    cut_size = random.random()*size[attack.target]*armour.resistance
+                    cut_depth = random.random()*attack.energy*armour.resistance
+                    damage = Wound("cut", name[attack.target], [cut_size, cut_depth], "{} lands a cut on {}'s {}.".format(attacker.name, defender.name, attack.target))
+                else:
+                    damage = Wound("stab", name[attack.target], sigmoid(pressure*attack.momentum)*attack.weapon.blade["length"], "{} successfully stabs {} in the {} with their {}.".format(attacker.name, defender.name, attack.target, attack.weapon.name))
+            self.turns.append(damage.text)
+            return damage
         if success:
-            defender.stance = Stance(defender, "".join(pos[attack.target]+[0]))
+            defender.stance = Stance(defender, pos[attack.target]+[0, 0])
+            defender.applyDamage(calcDamage(attack, defender.armour[attack.target]))
+        return [attacker, defender]
 
     async def nextTurn(self):
         distance = abs(self.p1.pos)+abs(self.p2.pos)
         if self.p1.isPlayer:
-            action1 = await self.rpg.promptUser(self.bot.get_user_info(self.p1.id), channel)
+            action1 = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.p1.ID), self.channel, "player 1's turn.")
+            print(action1)
         else:
-            action1 = await self.p1.ai.action(self)
+            action1 = self.p1.ai.action(self)
         if self.p2.isPlayer:
-            action2 = await self.rpg.promptUser(self.bot.get_user_info(self.p2.id), channel)
+            action2 = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.p2.ID), self.channel, "player 2's turn.")
         else:
-            action2 = await self.p2.ai.action(self)
+            action2 = self.p2.ai.action(self)
         action1 = action1.split(" ")
         action2 = action2.split(" ")
-        if not action1[0].startsWith("stance"):
-            attack1 = Attack(p1, distance, p1.weapon, action1[0], action1[1])
-        if not action2[0].startsWith("stance"):
-            attack2 = Attack(p2, distance, p2.weapon, action2[0], action2[1])
+        if not action1[0].startswith("stance"):
+            attack1 = Attack(self.p1, distance, self.p1.weapon, action1[0], action1[1])
+        if not action2[0].startswith("stance"):
+            attack2 = Attack(self.p2, distance, self.p2.weapon, action2[0], action2[1])
         if not attack1 == None:
-            defense2 = self.p2.ai.defend(p2.weapon, attack1)
-            result = await resolveAttack(attack1, defense2, self.p1.health)
+            defense2 = Defense(self.p2, self.p2.weapon, self.p2.stance, attack1)
+            result = await self.resolveAttack(attack1, defense2, self.p1, self.p2)
             self.p1 = result[0]
             self.p2 = result[1]
         if not attack2 == None and not self.p2.isDead():
-            defense1 = self.p1.ai.defend(p1.weapon, attack2)
-            result = await resolveAttack(attack1, defense2, self.p2, self.p1)
+            defense1 = Defense(self.p1, self.p1.weapon, self.p1.stance, attack2)
+            result = await self.resolveAttack(attack1, defense2, self.p2, self.p1)
             self.p1 = result[1]
             self.p2 = result[0]
         if self.p1.isDead() or self.p2.isDead():
             return [self.p1,self.p2]
-        return await self.turn()
+        await self.rpg.bot.edit_message(self.message, embed=self.updatemsg())
+        return await self.nextTurn()
         
         
 class ChillRPG:
@@ -250,6 +351,8 @@ class ChillRPG:
                           [Item("steel_axe01", {"amount":1})],
                           [Item("steel_spear01", {"amount":1})]]
         self.materials = [Material("mild_steel", True, 70, 370, 8050)]
+        self.defaultNPCinfo = fileIO("data/crpg/default_npc.json", "load")
+        self.defaultNPCinfo["weapon"] = (Item("steel_axe01", {"amount":1}))
 
     def refreshInv(self, inv):
         for x in inv.length:
@@ -315,7 +418,7 @@ class ChillRPG:
         confirm = await self.promptUser(user, channel, "Does the following describe your new character? ```{} is a {} year old {}. They have no skills or particular beneficial character traits.```".format(info["name"], info["age"], info["gender"]))
         if confirm.lower() in self.yes:
             player = Player(info)
-            await player.save()
+            player.save()
             return player
         else:
             await self.bot.send_message(channel, "Restarting character creation...")
@@ -356,15 +459,29 @@ class ChillRPG:
         await self.bot.send_message(ctx.message.channel, embed=self.statusEmbed(player))
 
     @commands.command(pass_context=True)
+    async def fight(self, ctx):
+        player1 = await self.getPlayer(ctx.message.author.id, ctx)
+        player2 = await self.getPlayer(ctx.message.mentions[0].id, ctx)
+        fight = Fight(player1, player2, self, ctx.message.channel)
+        await fight.start()
+
+    @commands.command(pass_context=True)
+    async def fightai(self, ctx):
+        player1 = await self.getPlayer(ctx.message.author.id, ctx)
+        player2 = Player(self.defaultNPCinfo, isPlayer=False)
+        fight = Fight(player1, player2, self, ctx.message.channel)
+        await fight.start()
+
+    @commands.command(pass_context=True)
     async def weapon(self, ctx):
         player = await self.getPlayer(ctx.message.author.id, ctx)
-        player.changeEquip(ctx.message.content[7:])
+        player.changeEquip(ctx.message.content[8:])
         await self.bot.send_message(ctx.message.channel, embed=discord.Embed(title="Success", description="Set your weapon to {}.".format(player.weapon.name), color=0x16ffeb))
 
     @commands.command(pass_context=True)
     async def save(self, ctx):
         player = await self.getPlayer(ctx.message.author.id, ctx)
-        await player.save()
+        player.save()
 
     @commands.command(pass_context=True)
     async def begin(self, ctx):
