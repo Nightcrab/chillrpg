@@ -1,0 +1,37 @@
+{
+	"name": "Bob",
+	"ID":"Bob",
+	"health" : {
+        "HP" : 100,
+        "bleed":0,
+        "h" : 100,
+        "t" : 100,
+        "la" : 100,
+        "ra" : 100,
+        "ll" : 100,
+        "rl" : 100
+	},
+	"proportions": {
+		"height": 1.6,
+		"arm": 0.8
+	},
+	"wounds" : [
+	],
+	"buffs" : {
+		"reaction" : 1
+	},
+	"combat_stats": {
+		"reactionspeed" : 500
+	},
+	"stamina" : 100,
+	"fatigue" : 0,
+	"level" : 0,
+	"balance" : 0,
+	"strength": {
+		"arm": 10, 
+		"legs": 10
+	},
+	"inv": [],
+	"mass": 80,
+	"location" : "chillbar"
+}

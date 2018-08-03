@@ -1,0 +1,7 @@
+{
+	"name":"skin",
+	"type":"flesh",
+	"wearable":true,
+	"cut_threshold":1,
+	"cut_resistance":1
+}
