@@ -108,6 +108,8 @@ class Player:
         content = ""
         for x in self.wounds:
             content += "{} on {}\n".format(x.type, name[x.location])
+        if content == "":
+            content = "None"
         return content
 
     def invmass(self):
@@ -129,7 +131,6 @@ class Item:
         if itemID == "":
             self.itemID = genID()
         else:
-            print(items)
             for key in items[itemID]:
                 setattr(self, key, items[itemID][key])
         for d in info:
@@ -204,6 +205,11 @@ class Attack:
         self.distance = math.sqrt(dz*dz+d1*d1)
 
         self.weapon = weapon
+        w_overlap = self.weapon.length - self.distance
+        if self.weapon.blade["length"] > w_overlap:
+            self.overlap = w_overlap
+        else:
+            self.overlap = self.weapon.blade["length"]
         if atktype == "stab":
             w_acceleration = player.strength["arm"]/weapon.mass
             b_acceleration = player.strength["legs"]/(player.mass+player.invmass()+weapon.mass)
@@ -215,11 +221,7 @@ class Attack:
         if atktype == "strike":
             self.acceleration = player.strength["arm"]/weapon.mass
             self.velocity = math.sqrt(2*self.acceleration*self.distance)
-            overlap = self.weapon.blade["length"] - self.distance
-            if self.weapon.blade["strike"]["area"] > overlap:
-                self.attack_area = overlap
-            else:
-                self.attack_area = self.weapon.blade["strike"]["area"]
+            self.attack_area = self.overlap
         self.energy = 1/2*self.weapon.blade["mass"]*self.velocity*self.velocity
         self.momentum = self.weapon.blade["mass"]*self.velocity
 
@@ -258,9 +260,6 @@ class Fight:
         self.p2.pos = 2
         self.rpg = chillrpg
         self.channel = channel
-        print(channel)
-        print(self.p1.stance)
-        print(self.p2.stance)
         self.turns = ["The battle began between {} and {}.".format(self.p1.name, self.p2.name)]
 
     def updatemsg(self):
@@ -288,30 +287,32 @@ class Fight:
         def success(attack, defense):
             return True
         def calcDamage(attack, armour):
-            if attack.weapon.blade[attack.type]["area"] == 0:
-                damage = Wound("blunt", name[attack.target], attack.weapon.mass-attack.weapon.blade["mass"], "{} hit {} with the handle of their weapon!".format(attacker.name, defender.name))
+            if attack.overlap == 0:
+                damage = Wound("blunt", attack.target, attack.weapon.mass-attack.weapon.blade["mass"], "{} hit {} with the handle of their weapon!".format(attacker.name, defender.name))
                 attacker.stance = Stance(defender, pos[attack.target]+[2, 1])
                 return damage
-            pressure = attack.weapon.blade[attack.type]["sharpness"]/100*attacker.strength["arm"]/attack.weapon.blade[attack.type]["area"] # sharpness applied as a multiplier of pressure, effectively dividing the impact area and thus increasing the imapct pressure
+            if attack.overlap < 0:
+                damage =  Wound("blunt", attack.target, 0, "{} was too far away to use their weapon!".format(attacker.name))
+                return damage
+            pressure = attack.weapon.blade[attack.type]["sharpness"]/100*attacker.strength["arm"]/attack.attack_area # sharpness applied as a multiplier of pressure, effectively dividing the impact area and thus increasing the imapct pressure
             if pressure > armour.cut_threshold:
                 if attack.type == "strike":
                     cut_size = random.random()*size[attack.target]*armour.resistance
                     cut_depth = random.random()*attack.energy*armour.resistance
-                    damage = Wound("cut", name[attack.target], [cut_size, cut_depth], "{} lands a cut on {}'s {}.".format(attacker.name, defender.name, attack.target))
+                    damage = Wound("cut", attack.target, [cut_size, cut_depth], "{} lands a cut on {}'s {}.".format(attacker.name, defender.name, name[attack.target]))
                 else:
-                    damage = Wound("stab", name[attack.target], sigmoid(pressure*attack.momentum)*attack.weapon.blade["length"], "{} successfully stabs {} in the {} with their {}.".format(attacker.name, defender.name, attack.target, attack.weapon.name))
-            self.turns.append(damage.text)
+                    damage = Wound("stab", attack.target, sigmoid(pressure*attack.momentum)*attack.weapon.blade["length"], "{} successfully stabs {} in the {} with their {}.".format(attacker.name, defender.name, name[attack.target], attack.weapon.name))
             return damage
         if success:
             defender.stance = Stance(defender, pos[attack.target]+[0, 0])
-            defender.applyDamage(calcDamage(attack, defender.armour[attack.target]))
-        return [attacker, defender]
+            damage = calcDamage(attack, defender.armour[attack.target])
+            defender.applyDamage(damage)
+        return [attacker, defender, damage.text]
 
     async def nextTurn(self):
         distance = abs(self.p1.pos)+abs(self.p2.pos)
-        if self.p1.isPlayer:
+        if not self.p1.isPlayer:
             action1 = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.p1.ID), self.channel, "player 1's turn.")
-            print(action1)
         else:
             action1 = self.p1.ai.action(self)
         if self.p2.isPlayer:
@@ -326,14 +327,16 @@ class Fight:
             attack2 = Attack(self.p2, distance, self.p2.weapon, action2[0], action2[1])
         if not attack1 == None:
             defense2 = Defense(self.p2, self.p2.weapon, self.p2.stance, attack1)
-            result = await self.resolveAttack(attack1, defense2, self.p1, self.p2)
-            self.p1 = result[0]
-            self.p2 = result[1]
+            result1 = await self.resolveAttack(attack1, defense2, self.p1, self.p2)
+            self.turns.append(result1[2])
+            self.p1 = result1[0]
+            self.p2 = result1[1]
         if not attack2 == None and not self.p2.isDead():
             defense1 = Defense(self.p1, self.p1.weapon, self.p1.stance, attack2)
-            result = await self.resolveAttack(attack1, defense2, self.p2, self.p1)
-            self.p1 = result[1]
-            self.p2 = result[0]
+            result2 = await self.resolveAttack(attack2, defense1, self.p2, self.p1)
+            self.turns.append(result2[2])
+            self.p1 = result2[1]
+            self.p2 = result2[0]
         if self.p1.isDead() or self.p2.isDead():
             return [self.p1,self.p2]
         await self.rpg.bot.edit_message(self.message, embed=self.updatemsg())
@@ -349,7 +352,8 @@ class ChillRPG:
         self.no = ["no", "n"]
         self.startkits = [[Item("pitchfork01", {"amount":1})],
                           [Item("steel_axe01", {"amount":1})],
-                          [Item("steel_spear01", {"amount":1})]]
+                          [Item("steel_spear01", {"amount":1})],
+                          [Item("steel_armingsword01", {"amount":1})]]
         self.materials = [Material("mild_steel", True, 70, 370, 8050)]
         self.defaultNPCinfo = fileIO("data/crpg/default_npc.json", "load")
         self.defaultNPCinfo["weapon"] = (Item("steel_axe01", {"amount":1}))
@@ -469,6 +473,7 @@ class ChillRPG:
     async def fightai(self, ctx):
         player1 = await self.getPlayer(ctx.message.author.id, ctx)
         player2 = Player(self.defaultNPCinfo, isPlayer=False)
+        player2.weapon = Item("steel_armingsword01", {"amount":1})
         fight = Fight(player1, player2, self, ctx.message.channel)
         await fight.start()
 
