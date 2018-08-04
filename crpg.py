@@ -6,7 +6,7 @@ from .utils.dataIO import fileIO
 import random
 import glob
 import pickle
-import re
+import time
 import math
 
 def genID(size=8, chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".split()):
@@ -33,12 +33,12 @@ name = {
       "rl": "right leg"
       }
 pos = {
-      "h" :  [0,1],
+      "h" :  [0,0.4],
       "t" :  [0,0],
-      "la":  [1,0],
-      "ra": [-1,0],
-      "ll": [1,-1],
-      "rl":[-1,-1]
+      "la":  [0.2,0],
+      "ra": [-0.2,0],
+      "ll": [0.5,-0.5],
+      "rl":[-0.5,-0.5]
       }
 size = {
       "h" :  0.06,
@@ -64,6 +64,7 @@ class Player:
         self.ai = AI(self)
         self.weapon = Item("steel_spear01", {"amount":1})
         self.isPlayer = isPlayer
+        self.lastUpdate = time.time()
         for key in info:
             setattr(self, key, info[key])
         if not "stance" in info:
@@ -107,10 +108,20 @@ class Player:
     def listWounds(self):
         content = ""
         for x in self.wounds:
-            content += "{} on {}\n".format(x.type, name[x.location])
+            if not hasattr(x, 'bleed'):
+                x.bleed = 0
+            content += "{} on {}, blood drain {}\n".format(x.type, name[x.location], x.bleed)
         if content == "":
             content = "None"
         return content
+
+    def update(self):
+        if not hasattr(self, "lastUpdate"):
+            self.lastUpdate = time.time()
+        for x in self.wounds:
+            if x.bleed > 0:
+                self.health["HP"] -= x.bleed * (time.time() - self.lastUpdate)
+        self.lastUpdate = time.time()
 
     def invmass(self):
         s = 0
@@ -179,7 +190,7 @@ class Stance:
         self.y = code[1]*0.7 #-1 bottom 0 middle 1 top
         self.z = code[2]*player.proportions["arm"]/3 #0 close 1 neutral 2 forward 3 overextended
         self.line = code[3]
-        self.name = str(code)
+        self.name = str([self.x,self.y,self.z])
 
     def lungelen(self):
         return 0
@@ -203,7 +214,6 @@ class Attack:
         dy = self.stance.y - pos[target][1]
         d1 = math.sqrt(dx*dx+dy*dy)
         self.distance = math.sqrt(dz*dz+d1*d1)
-
         self.weapon = weapon
         w_overlap = self.weapon.length - self.distance
         if self.weapon.blade["length"] > w_overlap:
@@ -241,6 +251,10 @@ class Wound:
         self.value = value
         self.location = location
         self.text = text
+        self.bleed = 0
+        if self.type == "cut":
+            bloodloss_modifier = 0.2
+            self.bleed = self.value[0]*self.value[1]*bloodloss_modifier
 
     def severity(self):
         if self.type == "cut":
@@ -256,8 +270,9 @@ class Fight:
     def __init__(self, player1, player2, chillrpg, channel):
         self.p1 = player1
         self.p2 = player2
-        self.p1.pos = -2
-        self.p2.pos = 2
+        self.p1.pos = -0.2
+        self.p2.pos = 0.2
+        self.distance = abs(self.p1.pos)+abs(self.p2.pos)
         self.rpg = chillrpg
         self.channel = channel
         self.turns = ["The battle began between {} and {}.".format(self.p1.name, self.p2.name)]
@@ -265,7 +280,7 @@ class Fight:
     def updatemsg(self):
         description = "you're in a fight, defend yourself m8"
         embed = discord.Embed(title="{} vs {}".format(self.p1.name, self.p2.name), description=description, color=0x16ff64)
-        embed.add_field(name="Stances", value="{}'s stance:{}\n{}'s stance:{}".format(self.p1.name, self.p1.stance.name, self.p2.name, self.p2.stance.name), inline=False)
+        embed.add_field(name="Stances", value="{}'s stance:{}\n{}'s stance:{}\n\nDistance:{}".format(self.p1.name, self.p1.stance.name, self.p2.name, self.p2.stance.name, self.distance), inline=False)
         
         if self.p1.isPlayer:
             h1 = self.p1.health    
@@ -297,8 +312,8 @@ class Fight:
             pressure = attack.weapon.blade[attack.type]["sharpness"]/100*attacker.strength["arm"]/attack.attack_area # sharpness applied as a multiplier of pressure, effectively dividing the impact area and thus increasing the imapct pressure
             if pressure > armour.cut_threshold:
                 if attack.type == "strike":
-                    cut_size = random.random()*size[attack.target]*armour.resistance
-                    cut_depth = random.random()*attack.energy*armour.resistance
+                    cut_size = random.random()*size[attack.target]*armour.cut_resistance
+                    cut_depth = random.random()*attack.energy*armour.cut_resistance
                     damage = Wound("cut", attack.target, [cut_size, cut_depth], "{} lands a cut on {}'s {}.".format(attacker.name, defender.name, name[attack.target]))
                 else:
                     damage = Wound("stab", attack.target, sigmoid(pressure*attack.momentum)*attack.weapon.blade["length"], "{} successfully stabs {} in the {} with their {}.".format(attacker.name, defender.name, name[attack.target], attack.weapon.name))
@@ -310,8 +325,9 @@ class Fight:
         return [attacker, defender, damage.text]
 
     async def nextTurn(self):
-        distance = abs(self.p1.pos)+abs(self.p2.pos)
-        if not self.p1.isPlayer:
+        self.distance = abs(self.p1.pos)+abs(self.p2.pos)
+        distance = self.distance
+        if self.p1.isPlayer:
             action1 = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.p1.ID), self.channel, "player 1's turn.")
         else:
             action1 = self.p1.ai.action(self)
@@ -339,6 +355,8 @@ class Fight:
             self.p2 = result2[0]
         if self.p1.isDead() or self.p2.isDead():
             return [self.p1,self.p2]
+        self.p1.update()
+        self.p2.update()
         await self.rpg.bot.edit_message(self.message, embed=self.updatemsg())
         return await self.nextTurn()
         
@@ -357,6 +375,7 @@ class ChillRPG:
         self.materials = [Material("mild_steel", True, 70, 370, 8050)]
         self.defaultNPCinfo = fileIO("data/crpg/default_npc.json", "load")
         self.defaultNPCinfo["weapon"] = (Item("steel_axe01", {"amount":1}))
+        self.players = {}
 
     def refreshInv(self, inv):
         for x in inv.length:
@@ -371,8 +390,13 @@ class ChillRPG:
         inv.append(item)
 
     async def getPlayer(self, ID, ctx): #Get a user's character, if it exists
+        if ID in self.players:
+            self.players[ID].update()
+            return self.players[ID]
         if os.path.exists("data/crpg/players/{}".format(ID)):
-            return loadPickle("data/crpg/players/{}/info.obj".format(ID))
+            self.players[ID] = loadPickle("data/crpg/players/{}/info.obj".format(ID))
+            self.players[ID].update()
+            return self.players[ID]
         else:
             prompt = "You haven't created a character yet, or your previous one is deceased. Would you like to create a new character?"
             response = await self.promptUser(ctx.message.author, ctx.message.channel, prompt)
