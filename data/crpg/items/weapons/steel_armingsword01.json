@@ -4,8 +4,9 @@
 	"length":0.9,
 	"mass": 1.1,
 	"balance":50,
+	"description": "A one-handed steel sword. Probably best used with some type of shield or buckler in the opposite hand. It's decently balanced and an appropriate sidearm or weapon of self defense.",
 	"blade": {
-		"mass": 1,
+		"mass": 0.9,
 		"length" : 0.73,
 		"stab" : {
 			"area" : 2,
@@ -16,7 +17,7 @@
 		}
 	},
 	"attacks": {
-		"stab":"Thrust",
-		"strike":"Cut"
+		"lunge":"stab",
+        "cut":"strike"
 	}
 }

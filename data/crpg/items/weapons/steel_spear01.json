@@ -1,18 +1,24 @@
 {
 	"name":"Steel Spear",
 	"type":"polearm",
+	"bladed":true,
 	"length":3,
 	"mass": 2.1,
 	"balance":15,
+	"description": "It's a 3 meter stick of wood with a 20cm, semi-sharp but maintained steel tip. A soldier's weapon.",
 	"blade": {
 		"mass": 1.1,
 		"length":0.2,
 		"stab": {
 			"area" : 1,
 			"sharpness" : 60
+		},
+		"strike": {
+			"sharpness" : 40
 		}
 	},
 	"attacks": {
-		"stab":"Thrust"
+		"thrust":"stab",
+		"slice":"strike"
 	}
 }

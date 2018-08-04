@@ -49,7 +49,7 @@ size = {
       "rl": 0.15
       }
 
-def distance(pos1, pos2):
+def distance3D(pos1, pos2):
     x1 = pos1[0]
     y1 = pos1[1]
     z1 = pos1[2]
@@ -62,13 +62,14 @@ def distance(pos1, pos2):
 class Player:
     def __init__(self, info, isPlayer=True):
         self.ai = AI(self)
-        self.weapon = Item("steel_spear01", {"amount":1})
+        self.weapon = Item("fist", {"amount":2})
         self.isPlayer = isPlayer
+        self.combat_stats["reflex_speed"] = 0.9
         self.lastUpdate = time.time()
         for key in info:
             setattr(self, key, info[key])
         if not "stance" in info:
-            self.stance = Stance(self, [0,0,0,0])
+            self.stance = Stance(self, [0,0,0,1])
         if not "armour" in info:
             self.armour = {
             "h" : Item("skin", {"amount":1}),
@@ -93,15 +94,17 @@ class Player:
         if len(matches) > 0:
             self.weapon = matches[0]
         else:
-            self.weapon = [item for item in self.inv if item.name.lower() == "fists"][0]
+            self.weapon = [item for item in self.inv if item.name.lower() == "fist"][0]
         self.save()
 
     def applyDamage(self, wound):
+        limb_damage_modifier = 1.4
         if wound == None:
             return
         if wound.type == "blunt":
             self.health[wound.location] -= wound.value
         else:
+            self.health[wound.location] -= wound.value[1]*limb_damage_modifier
             self.wounds.append(wound)
         self.save()
 
@@ -110,7 +113,7 @@ class Player:
         for x in self.wounds:
             if not hasattr(x, 'bleed'):
                 x.bleed = 0
-            content += "{} on {}, blood drain {}\n".format(x.type, name[x.location], x.bleed)
+            content += "{} on {}, bleeding {} HP per second\n".format(x.type, name[x.location], round(x.bleed, 5))
         if content == "":
             content = "None"
         return content
@@ -121,6 +124,8 @@ class Player:
         for x in self.wounds:
             if x.bleed > 0:
                 self.health["HP"] -= x.bleed * (time.time() - self.lastUpdate)
+        if self.health["HP"] < 0:
+            self.health["HP"] = 0
         self.lastUpdate = time.time()
 
     def invmass(self):
@@ -139,6 +144,7 @@ class Item:
     def __init__(self, itemID, *info, **kwargs):
 
         #if id is given, take the properties of default item with that id, if not, properties should be passed in a dictionary
+        self.amount = 1
         if itemID == "":
             self.itemID = genID()
         else:
@@ -150,6 +156,15 @@ class Item:
 
         for key in kwargs:
             setattr(self, key, kwargs[key])
+
+        if not hasattr(self, "description"):
+            self.description = "No description."
+
+    def getMoves(self):
+        content = ""
+        for key in self.attacks.keys():
+            content += key+"\n"
+        return content
 
 class AI:
     def __init__(self, player, defend=None, action=None):
@@ -167,6 +182,7 @@ class AI:
         "t" : "pu",
         "h" : "pl"
         }
+        return "b"
         if attack.type == "stab":
             return stab_table[attack.target]
         elif attack.type == "strike":
@@ -188,7 +204,7 @@ class Stance:
     def __init__(self, player, code):
         self.x = code[0]*0.3 #-1 left 0 middle 1 right
         self.y = code[1]*0.7 #-1 bottom 0 middle 1 top
-        self.z = code[2]*player.proportions["arm"]/3 #0 close 1 neutral 2 forward 3 overextended
+        self.z = code[2]*player.proportions["arm"]/4 #1 close 2 neutral 3 forward 4 overextended
         self.line = code[3]
         self.name = str([self.x,self.y,self.z])
 
@@ -223,8 +239,7 @@ class Attack:
         if atktype == "stab":
             w_acceleration = player.strength["arm"]/weapon.mass
             b_acceleration = player.strength["legs"]/(player.mass+player.invmass()+weapon.mass)
-            self.velocity = math.sqrt(2*w_acceleration*self.distance)
-            self.velocity += math.sqrt(2*b_acceleration*self.stance.lungelen())
+            self.velocity = math.sqrt(2*w_acceleration*(self.distance+self.stance.lungelen()))
             self.acceleration = w_acceleration + b_acceleration
             self.attack_area = weapon.blade["stab"]["area"]
         
@@ -241,9 +256,13 @@ class Defense:
         self.type = player.ai.defend(player.weapon, attack)
         self.weapon =  weapon
         self.stance = stance
-        self.reaction = player.combat_stats["reactionspeed"]*player.buffs["reaction"]
-        if self.type == "b":
-            self.destination = pos[attack.target]+[0]
+        def limb_lag(health):
+            x = (100-health)
+            return 5 ** (x/10-2)
+        self.reaction = player.combat_stats["reactionspeed"]*player.buffs["reaction"]+limb_lag(player.health[attack.target])
+        self.destination = pos[attack.target]+[0]
+        distance = distance3D([self.stance.x, self.stance.y, self.stance.z], destination)
+        velocity = player.combat_stats["reflex_speed"]*weapon.balance/100
 
 class Wound:
     def __init__(self, _type, location, value, text):
@@ -252,9 +271,12 @@ class Wound:
         self.location = location
         self.text = text
         self.bleed = 0
+        bloodloss_modifier = 0.2
+        print(value)
         if self.type == "cut":
-            bloodloss_modifier = 0.2
             self.bleed = self.value[0]*self.value[1]*bloodloss_modifier
+        if self.type == "stab":
+            self.bleed = self.value*bloodloss_modifier
 
     def severity(self):
         if self.type == "cut":
@@ -280,27 +302,31 @@ class Fight:
     def updatemsg(self):
         description = "you're in a fight, defend yourself m8"
         embed = discord.Embed(title="{} vs {}".format(self.p1.name, self.p2.name), description=description, color=0x16ff64)
-        embed.add_field(name="Stances", value="{}'s stance:{}\n{}'s stance:{}\n\nDistance:{}".format(self.p1.name, self.p1.stance.name, self.p2.name, self.p2.stance.name, self.distance), inline=False)
+        embed.add_field(name="Stances", value="{}'s stance: {}\n{}'s stance: {}\n\nDistance: {} m".format(self.p1.name, self.p1.stance.name, self.p2.name, self.p2.stance.name, self.distance), inline=False)
         
         if self.p1.isPlayer:
             h1 = self.p1.health    
-            embed.add_field(name="{}'s Health".format(self.p1.name), value="HP: {}\nHead: {}\nTorso: {}\nLeft Arm: {}\nRight Arm: {}\nLeft Leg: {}\nRight Leg: {}\n".format(str(h1["HP"]), str(h1["h"]), str(h1["t"]), str(h1["la"]), str(h1["ra"]), str(h1["ll"]), str(h1["rl"])), inline=True)
+            embed.add_field(name="{}'s Health".format(self.p1.name), value="HP: {}\nHead: {}\nTorso: {}\nLeft Arm: {}\nRight Arm: {}\nLeft Leg: {}\nRight Leg: {}\n".format(str(round(h1["HP"], 2)), str(round(h1["h"], 2)), str(round(h1["t"], 2)), str(round(h1["la"], 2)), str(round(h1["ra"], 2)), str(round(h1["ll"], 2)), str(round(h1["rl"], 2))), inline=True)
             embed.add_field(name="{}'s Wounds".format(self.p1.name), value=self.p1.listWounds(), inline=True)
         #embed.add_field(name=" ",value=" ",inline=False)
         if self.p2.isPlayer:
             h2 = self.p2.health
-            embed.add_field(name="{}'s Health".format(self.p2.name), value="HP: {}\nHead: {}\nTorso: {}\nLeft Arm: {}\nRight Arm: {}\nLeft Leg: {}\nRight Leg: {}\n".format(str(h2["HP"]), str(h2["h"]), str(h2["t"]), str(h2["la"]), str(h2["ra"]), str(h2["ll"]), str(h2["rl"])), inline=True)
+            embed.add_field(name="{}'s Health".format(self.p2.name), value="HP: {}\nHead: {}\nTorso: {}\nLeft Arm: {}\nRight Arm: {}\nLeft Leg: {}\nRight Leg: {}\n".format(str(round(h2["HP"], 2)), str(round(h2["h"], 2)), str(round(h2["t"], 2)), str(round(h2["la"], 2)), str(round(h2["ra"], 2)), str(round(h2["ll"], 2)), str(round(h2["rl"], 2))), inline=True)
             embed.add_field(name="{}'s Wounds".format(self.p2.name), value=self.p2.listWounds(), inline=True)
         embed.add_field(name="Battle Log", value="\n".join(self.turns), inline=False)
+        if self.p1.isPlayer:
+            embed.add_field(name="{}'s Moves".format(self.p1.name), value=self.p1.weapon.getMoves(), inline=False)
+        if self.p2.isPlayer:
+            embed.add_field(name="{}'s Moves".format(self.p2.name), value=self.p2.weapon.getMoves(), inline=False)
         return embed
 
     async def start(self):
         self.message = await self.rpg.bot.send_message(self.channel, embed=self.updatemsg())
-        await self.nextTurn()
+        return await self.nextTurn()
 
     async def resolveAttack(self, attack, defense, attacker, defender):
         def success(attack, defense):
-            return True
+            def_time = 
         def calcDamage(attack, armour):
             if attack.overlap == 0:
                 damage = Wound("blunt", attack.target, attack.weapon.mass-attack.weapon.blade["mass"], "{} hit {} with the handle of their weapon!".format(attacker.name, defender.name))
@@ -327,19 +353,42 @@ class Fight:
     async def nextTurn(self):
         self.distance = abs(self.p1.pos)+abs(self.p2.pos)
         distance = self.distance
+        if self.p1.isDead() or self.p2.isDead():
+            return [self.p1,self.p2]
         if self.p1.isPlayer:
-            action1 = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.p1.ID), self.channel, "player 1's turn.")
+            action1 = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.p1.ID), self.channel, "{}'s turn. They have 10 seconds to respond.".format(self.p1.name))
+            if not action2 == None:
+                action1 = action1.split(" ")
+                if not action1[0].lower() in self.p1.weapon.attacks:
+                    action1 = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.p1.ID), self.channel, "That's not a move you can do. You took no action this turn.")
+                action1 = [self.p1.weapon.attacks[action1[0].lower()]]+[action1[1]]
+            else:
+                action1 = ["defend", "t"]
         else:
             action1 = self.p1.ai.action(self)
         if self.p2.isPlayer:
-            action2 = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.p2.ID), self.channel, "player 2's turn.")
+            action2 = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.p2.ID), self.channel, "{}'s turn. They have 10 seconds to respond.".format(self.p2.name))
+            if not action2 == None:
+                action2 = action2.split(" ")
+                if not action2[0].lower() in self.p2.weapon.attacks:
+                    action2 = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.p2.ID), self.channel, "That's not a move you can do. You took no action this turn.")
+                    action2 = 
+                action2 = [self.p2.weapon.attacks[action2[0].lower()]]+[action2[1]]
+            else:
+                action2 = ["defend","t"]
         else:
             action2 = self.p2.ai.action(self)
-        action1 = action1.split(" ")
-        action2 = action2.split(" ")
-        if not action1[0].startswith("stance"):
+        if action1[0] == "defend":
+            self.p1.buffs["reactionspeed"] = 0.7
+        else:
+            self.p1.buffs["reactionspeed"] = 1
+        if ation2[0] == "defend":
+            self.p2.buffs["reactionspeed"] = 0.7
+        else:
+            self.p1.buffs["reactionspeed"] = 1
+        if not action1[0].startswith("defend"):
             attack1 = Attack(self.p1, distance, self.p1.weapon, action1[0], action1[1])
-        if not action2[0].startswith("stance"):
+        if not action2[0].startswith("defend"):
             attack2 = Attack(self.p2, distance, self.p2.weapon, action2[0], action2[1])
         if not attack1 == None:
             defense2 = Defense(self.p2, self.p2.weapon, self.p2.stance, attack1)
@@ -353,10 +402,10 @@ class Fight:
             self.turns.append(result2[2])
             self.p1 = result2[1]
             self.p2 = result2[0]
-        if self.p1.isDead() or self.p2.isDead():
-            return [self.p1,self.p2]
         self.p1.update()
         self.p2.update()
+        if self.p1.isDead() or self.p2.isDead():
+            return [self.p1,self.p2]
         await self.rpg.bot.edit_message(self.message, embed=self.updatemsg())
         return await self.nextTurn()
         
@@ -372,6 +421,7 @@ class ChillRPG:
                           [Item("steel_axe01", {"amount":1})],
                           [Item("steel_spear01", {"amount":1})],
                           [Item("steel_armingsword01", {"amount":1})]]
+        self.startInv = [Item("fist", {"amount":2})]
         self.materials = [Material("mild_steel", True, 70, 370, 8050)]
         self.defaultNPCinfo = fileIO("data/crpg/default_npc.json", "load")
         self.defaultNPCinfo["weapon"] = (Item("steel_axe01", {"amount":1}))
@@ -381,6 +431,11 @@ class ChillRPG:
         for x in inv.length:
             if x.amount == 0:
                 del x
+
+    def unloadPlayer(self, ID):
+        if not ID in self.players:
+            return
+        del(self.players[ID])
 
     async def addItem(self, inv, item):
         for x in inv:
@@ -406,6 +461,8 @@ class ChillRPG:
     async def newPlayer(self, user, channel): #Initiate character creation
         ID = user.id
 
+        self.unloadPlayer(ID)
+
         info = fileIO("data/crpg/default_player.json", "load")
         os.makedirs("data/crpg/players/{}".format(ID))
 
@@ -415,7 +472,7 @@ class ChillRPG:
         info["age"] = await self.promptUser(user, channel, "How old are you (in years)?")
         info["gender"] = await self.promptUser(user, channel, "What will your gender be?")
         info["gender"] = info["gender"].lower()
-        history = await self.promptUser(user, channel, "What is your background? Respond with a number.\n```0. Peasant\n1. Lumberjack\n2. Deserter```")
+        history = await self.promptUser(user, channel, "What is your background? Respond with a number.\n```0. Peasant\n1. Lumberjack\n2. Deserter\n3. Man-at-arms```")
         if not history.isdigit():
             history = "0"
         history = int(history)
@@ -424,25 +481,7 @@ class ChillRPG:
         if history == None or history < 0 or history > len(self.startkits)+1:
             history = 0
         info["inv"] = self.startkits[history]
-        fist = {
-            "name":"Fists",
-            "type":"knuckledusters",
-            "length": info["proportions"]["arm"],
-            "mass": 0.0065*info["mass"],
-            "balance":70,
-            "blade": {
-                "mass": 0.0065,
-                "length":0.04,
-                "stab": {
-                    "area" : 5,
-                    "sharpness" : 10
-                }
-            },
-            "attacks": {
-                "stab":"Punch"
-            }
-        }
-        info["inv"].append(Item("", fist, {"amount":1}))
+        info["inv"].extend(self.startInv)
         confirm = await self.promptUser(user, channel, "Does the following describe your new character? ```{} is a {} year old {}. They have no skills or particular beneficial character traits.```".format(info["name"], info["age"], info["gender"]))
         if confirm.lower() in self.yes:
             player = Player(info)
@@ -450,18 +489,19 @@ class ChillRPG:
             return player
         else:
             await self.bot.send_message(channel, "Restarting character creation...")
-            return await self.newPlayer(ID, channel)
+            return await self.newPlayer(user, channel)
 
-    async def promptUser(self, author, channel, prompt=None):
+    async def promptUser(self, author, channel, prompt=None, timelimit=None):
         if not prompt == None:
             await self.bot.send_message(channel, prompt)
-        response = await self.bot.wait_for_message(author=author, channel=channel)
+        response = await self.bot.wait_for_message(timeout=timelimit, author=author, channel=channel)
         return response.content
 
     async def newFight(self, p1, p2, ctx):
         return Fight(p1, p2, self, ctx.message.channel)
 
     def listItems(self, inv):
+        print(inv)
         content = ""
         for item in inv:
             content += "\n{} x {}".format(item.name, item.amount)
@@ -473,7 +513,22 @@ class ChillRPG:
     def statusEmbed(self, player):
         embed = discord.Embed(title="{}'s Status".format(player.name), color=0x16ff64)
         embed.add_field(name="Stats", value="Health: {}\nStamina: {}\nFatigue: {}\nLevel: {}\nBalance: {}\n".format(player.health["HP"], player.stamina, player.fatigue, player.level, player.balance), inline=False)
+        embed.add_field(name="Wounds", value=player.listWounds(), inline=True)
+        embed.add_field(name="Equipment", value="Weapon: {}".format(player.weapon.name), inline=True)
         embed.add_field(name="Location", value="{}".format(self.locations[player.location]["description"]), inline=False)
+        return embed
+
+    def iteminfo(self, item):
+        if not hasattr(item, "description"):
+            item.description = "No description."
+        weaponstats = ""
+        defensestats = ""
+        if item.type == "polearm" or item.type == "sword":
+            item.bladed = True
+        if item.bladed:
+            weaponstats = "\n**Weapon Stats**\nBlade Weight: {} kg\nBlade Size: {} m\nPoint Sharpness: {}\nEdge Sharpness: {}".format(item.blade["mass"], item.blade["length"], item.blade["stab"]["sharpness"], item.blade["strike"]["sharpness"])
+        description = "\n**Stats:**\nWeight: {} kg\nLength: {} m\nType: {}\nDescription: {}\n{}".format(item.mass, item.length, item.type, item.description, weaponstats, defensestats)
+        embed = discord.Embed(title=item.name, description=description, color=0x000ed8)
         return embed
 
     @commands.command(pass_context=True)
@@ -491,7 +546,15 @@ class ChillRPG:
         player1 = await self.getPlayer(ctx.message.author.id, ctx)
         player2 = await self.getPlayer(ctx.message.mentions[0].id, ctx)
         fight = Fight(player1, player2, self, ctx.message.channel)
-        await fight.start()
+        result = await fight.start()
+        player1 = result[0]
+        player2 = result[1]
+        if player1.isDead():
+            self.send_message(ctx.message.channel, "{} died.".format(player1.name))
+        elif player2.isDead():
+            self.send_message(ctx.message.channel, "{} died.".format(player2.name))
+        else:
+            self.send_message(ctx.message.channel, "The fight ended.")
 
     @commands.command(pass_context=True)
     async def fightai(self, ctx):
@@ -499,12 +562,31 @@ class ChillRPG:
         player2 = Player(self.defaultNPCinfo, isPlayer=False)
         player2.weapon = Item("steel_armingsword01", {"amount":1})
         fight = Fight(player1, player2, self, ctx.message.channel)
-        await fight.start()
+        result = await fight.start()
+        player1 = result[0]
+        player2 = result[1]
+        if player1.isDead():
+            self.send_message(ctx.message.channel, "{} died.".format(player1.name))
+        elif player2.isDead():
+            self.send_message(ctx.message.channel, "{} died.".format(player2.name))
+        else:
+            self.send_message(ctx.message.channel, "The fight ended.")
 
     @commands.command(pass_context=True)
-    async def weapon(self, ctx):
+    async def viewitem(self, ctx):
+        itemname = ctx.message.content[10:]
         player = await self.getPlayer(ctx.message.author.id, ctx)
-        player.changeEquip(ctx.message.content[8:])
+        matches = [item for item in player.inv if item.name.lower() == itemname.lower()] 
+        print(itemname)
+        if len(matches) > 0:
+            await self.bot.send_message(ctx.message.channel, embed=self.iteminfo(matches[0]))
+        else:
+            await self.bot.send_message(ctx.message.channel, "You don't have that item.")
+    @commands.command(pass_context=True)
+    async def equip(self, ctx):
+        player = await self.getPlayer(ctx.message.author.id, ctx)
+        print(ctx.message.content[7:])
+        player.changeEquip(ctx.message.content[7:])
         await self.bot.send_message(ctx.message.channel, embed=discord.Embed(title="Success", description="Set your weapon to {}.".format(player.weapon.name), color=0x16ffeb))
 
     @commands.command(pass_context=True)

@@ -1,6 +1,7 @@
 {
 	"name":"Steel Pitchfork",
 	"type":"polearm",
+	"bladed":true,
 	"length":2.5,
 	"mass": 2.3,
 	"balance":15,
@@ -12,6 +13,7 @@
 		}
 	},
 	"attacks": {
-		"stab":"Thrust"
+		"thrust":"stab",
+        "whack":"strike"
 	}
 }

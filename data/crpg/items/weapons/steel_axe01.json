@@ -1,11 +1,13 @@
 {
 	"name":"Steel Axe",
 	"type":"polearm",
+	"bladed":true,
 	"length":1.1,
-	"mass": 3,
+	"mass": 1.13,
 	"balance":20,
+	"description": "A tree-feller's axe. Not easy to swing around but packs a punch.",
 	"blade": {
-		"mass": 2,
+		"mass": 0.8,
 		"length":0.2,
 		"stab" : {
 			"area" : 10,
@@ -17,7 +19,7 @@
 		}
 	},
 	"attacks": {
-		"stab":"Thrust",
-		"strike":"Chop"
+		"jab":"stab",
+        "chop":"strike"
 	}
 }
