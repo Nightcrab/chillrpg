@@ -1,0 +1,7 @@
+{
+	"name":"Steel Helmet",
+	"type":"armour",
+	"wearable":true,
+	"cut_threshold":10,
+	"cut_resistance":60
+}

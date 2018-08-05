@@ -1,0 +1,15 @@
+{
+	"name":"Bread Chunk",
+	"max_quantity":10,
+	"has":10,
+	"becomes": {
+		"empty":"nothing"
+	},
+	"contains":["food"],
+	"type":"container",
+	"bladed":false,
+	"length":0.1,
+	"mass": 0.04,
+	"balance": 30,
+	"description": "A roughly 10x10x2cm chunk of mystery bread."
+}

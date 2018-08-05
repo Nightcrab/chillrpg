@@ -1,0 +1,25 @@
+{
+	"name":"Steel Flanged Mace",
+	"type":"mace",
+	"bladed":true,
+	"length":0.6,
+	"mass": 1.3,
+	"balance":50,
+	"description": "A flanged mace - effective at crushing and damaging armour, as well as dealing blunt damage to oppenents. Shorter than but just as heavy as a one-handed sword.",
+	"blade": {
+		"mass": 1,
+		"length":0.03,
+		"stab": {
+			"area" : 1,
+			"sharpness" : 1
+		},
+		"strike": {
+			"area":1,
+			"sharpness" : 50
+		}
+	},
+	"attacks": {
+		"jab":"stab",
+		"smash":"strike"
+	}
+}

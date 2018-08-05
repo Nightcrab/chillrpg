@@ -1,0 +1,24 @@
+{
+    "name":"Fist",
+    "type":"body part",
+    "bladed":false,
+    "length": 0.8,
+    "mass": 0.52,
+    "balance":70,
+    "description": "A standard human component.",
+    "blade": {
+        "mass": 0.0065,
+        "length":0.04,
+        "stab": {
+            "area" : 5,
+            "sharpness" : 10
+        },
+        "strike": {
+            "sharpness": 0
+        }
+    },
+    "attacks": {
+        "punch":"stab",
+        "slap":"strike"
+    }
+}

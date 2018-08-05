@@ -19,7 +19,8 @@
 		"reaction" : 1
 	},
 	"combat_stats": {
-		"reactionspeed" : 500
+		"reactionspeed" : 0.5,
+		"reflex_speed": 0.9
 	},
 	"stamina" : 100,
 	"fatigue" : 0,

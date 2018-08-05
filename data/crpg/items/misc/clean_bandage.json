@@ -1,0 +1,12 @@
+{
+	"name":"Clean Bandage",
+	"becomes": {
+		"bandage" : "used_bandage"
+	},
+	"type":"bandage",
+	"bladed":false,
+	"length":0.12,
+	"mass": 0.1,
+	"balance": 30,
+	"description": "A semi-sterile piece of thick fabric used for wrapping over wounds. Assists in wound healing and stops you bleeding to death."
+}
