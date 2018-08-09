@@ -1,3 +1,6 @@
 {
-	"description" : "A chill bar."
+	"name":"Chillbar",
+	"id":"chillbar",
+	"description" : "A bar, in the middle of nowhere. You can find food, drink and company there but there's more to see elsewhere.",
+	"players":[]
 }

@@ -1,7 +1,6 @@
 {
 	"health" : {
         "HP" : 100,
-        "bleed":0,
         "h" : 100,
         "t" : 100,
         "la" : 100,
@@ -9,23 +8,35 @@
         "ll" : 100,
         "rl" : 100
 	},
+	"bloodgain" : 0.3,
+	"hunger":0,
+	"thirst":0,
 	"proportions": {
 		"height": 1.6,
 		"arm": 0.8
 	},
+	"illnesses" : [
+	],
 	"wounds" : [
 	],
 	"buffs" : {
 		"reaction" : 1
 	},
+	"buying" : {},
+	"selling" : {},
 	"combat_stats": {
 		"reactionspeed" : 0.5,
-		"reflex_speed": 0.9
+		"reflex_speed": 1.5
+	},
+	"skills" : {
+		"one_handed_sword" : 0,
+		"two_handed_sword": 0,
+		"polearm": 0,
+		"woodchopping": 0
 	},
 	"stamina" : 100,
 	"fatigue" : 0,
 	"level" : 0,
-	"balance" : 0,
 	"strength": {
 		"arm": 10, 
 		"legs": 10

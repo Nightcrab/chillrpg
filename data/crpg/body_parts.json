@@ -3,36 +3,42 @@
     	"name": "head",
     	"size": 0.06,
     	"pos":[0, 0.4],
+    	"healrate": 0.4,
     	"bv_density":0
     },
     "la" :  {
     	"name": "left arm",
     	"size": 0.06,
     	"pos":[0, 0.4],
+    	"healrate": 0.6,
     	"bv_density":0.07
     },
     "ra" :  {
     	"name": "right arm",
     	"size": 0.06,
     	"pos":[0, 0.4],
+    	"healrate": 0.6,
     	"bv_density":0.07
     },
     "ll" :  {
     	"name": "left leg",
     	"size": 0.06,
     	"pos":[0, 0.4],
+    	"healrate": 0.45,
     	"bv_density":0.12
     },
     "rl" :  {
     	"name": "right leg",
     	"size": 0.06,
     	"pos":[0, 0.4],
+    	"healrate": 0.45,
     	"bv_density":0.12
     },
     "t" :  {
     	"name": "torso",
     	"size": 0.3,
     	"pos":[0, 0],
+    	"healrate": 0.3,
     	"bv_density":0.3
     }
 }

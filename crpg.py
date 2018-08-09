@@ -8,6 +8,8 @@ import glob
 import pickle
 import time
 import math
+import collections
+import asyncio
 
 def genID(size=8, chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".split()):
     return ''.join(random.choice(chars) for _ in range(size))
@@ -25,6 +27,7 @@ def sigmoid(x, deriv=False):
     return 1/(1+math.exp(-x))
 
 body_part = fileIO("data/crpg/body_parts.json", "load")
+default_player = fileIO("data/crpg/default_player.json", "load")
 
 def distance3D(pos1, pos2):
     x1 = pos1[0]
@@ -45,7 +48,6 @@ class Player:
         self.weapon = Item("fist", {"amount":2})
         self.isPlayer = isPlayer
         self.lastUpdate = time.time()
-        self.bloodgain = 0.3
         for key in info:
             setattr(self, key, info[key])
         if not "stance" in info:
@@ -60,7 +62,6 @@ class Player:
             "rl" : Item("skin", {"amount":1}),
             }
         self.ai = AI(self)
-        self.combat_stats["reflex_speed"] = 1.5
 
     def isDead(self):
         if self.health["h"] <= 0:
@@ -86,9 +87,6 @@ class Player:
             return
         if wound.type == "blunt":
             self.health[wound.location] -= wound.value
-            if wound.loaction == "h":
-                if wound.value > skull_strength:
-                    self.health["h"] -= 65
         else:
             self.health[wound.location] -= wound.value[1]*wound.value[0]*limb_damage_modifier
             self.wounds.append(wound)
@@ -104,7 +102,7 @@ class Player:
             if numbered:
                 i += 1
                 marker = str(i)+"."
-            content += "{} {} on {}, bleeding at a rate of {}\n".format(marker, uppercase(x.type), body_part[x.location]["name"], round(x.bleed*100, 1))
+            content += "{} {} on {}, bleeding at a rate of {} HP/minute\n".format(marker, uppercase(x.type), body_part[x.location]["name"], round(x.bleed*60, 1))
         if content == "":
             content = "None"
         return content
@@ -121,16 +119,43 @@ class Player:
             return "never."
         return "in "+str(round(self.health["HP"]/self.bleedRate(),1))+" seconds."
 
+    def balance(self, mode="int"):
+        for x in self.inv:
+            if x.itemID == "coin":
+                if mode == "str":
+                    return str(x.amount)+" coins"
+                return x.amount
+        if mode == "str":
+            return "No coins"
+        return 0
+
     def update(self):
+
+        for key in default_player:
+            if not hasattr(self, key):
+                setattr(self, key, default_player[key])
+            if isinstance(default_player[key], collections.Mapping):
+                for k in default_player[key]:
+                    if not default_player[key][k] in getattr(self, key):
+                        d = getattr(self, key)
+                        d[k] = default_player[key][k]
+
         if not hasattr(self, "lastUpdate"):
             self.lastUpdate = time.time()
         self.health["HP"] += self.bloodgain
+        #self.hunger += 0.005*(time.time() - self.lastUpdate)
         for x in self.wounds:
             x.update()
             if x.bleed > 0:
                 self.health["HP"] -= x.bleed * (time.time() - self.lastUpdate)
-        if self.health["HP"] < 0:
-            self.health["HP"] = 0
+        for x in self.health:
+            if self.health[x] > 100:
+                self.health[x] = 100
+            if self.health[x] < 0:
+                self.health[x] = 0
+            if x == "HP" or x == "bleed":
+                continue
+            self.health[x] += body_part[x]["healrate"] * (time.time() - self.lastUpdate)
         self.lastUpdate = time.time()
 
     def invmass(self):
@@ -141,8 +166,12 @@ class Player:
 
     def save(self):
         if not self.isPlayer:
+            if not os.path.exists("data/crpg/npcs/{}".format(self.ID)):
+                os.makedirs("data/crpg/npcs/{}".format(self.ID))
             savePickle("data/crpg/npcs/{}/info.obj".format(self.ID), self)
         else:
+            if not os.path.exists("data/crpg/players/{}".format(self.ID)):
+                os.makedirs("data/crpg/players/{}".format(self.ID))
             savePickle("data/crpg/players/{}/info.obj".format(self.ID), self)
 
 class Item:
@@ -153,6 +182,7 @@ class Item:
         if itemID == "":
             self.itemID = genID()
         else:
+            self.itemID = itemID
             for key in items[itemID]:
                 setattr(self, key, items[itemID][key])
         for d in info:
@@ -239,12 +269,14 @@ class Stance:
         return 0
 
 class Material:
-    def __init__(self, name, brittle, tensile, toughness, density):
+    def __init__(self, name, cut_threshold, cut_resistance, brittle, tensile, toughness, density):
         self.name = name
         self.brittle = brittle
         self.tensile = tensile
         self.toughness = toughness
         self.density = density
+        self.cut_resistance = cut_resistance
+        self.cut_threshold = cut_threshold
 
 class Attack:
     """An attack, usually countered with a defense."""
@@ -300,7 +332,8 @@ class Wound:
     def __init__(self, _type, location, value, text, pressure=None):
         self.type = _type
         self.value = value
-        self.pressure = pressure
+        if not pressure == None:
+            self.pressure = pressure
         self.location = location
         self.text = text
         self.bleed = 0
@@ -354,15 +387,15 @@ class Fight:
         embed = discord.Embed(title="{} vs {}".format(self.p1.name, self.p2.name), description=description, color=0x16ff64)
         embed.add_field(name="Stances", value="{}'s stance: {}\n{}'s stance: {}\n\nDistance: {} m".format(self.p1.name, self.p1.stance.name, self.p2.name, self.p2.stance.name, self.distance), inline=False)
         
-        if self.p1.isPlayer:
-            h1 = self.p1.health    
-            embed.add_field(name="{}'s Health".format(self.p1.name), value="HP: {}\nHead: {}\nTorso: {}\nLeft Arm: {}\nRight Arm: {}\nLeft Leg: {}\nRight Leg: {}\n".format(str(round(h1["HP"], 2)), str(round(h1["h"], 2)), str(round(h1["t"], 2)), str(round(h1["la"], 2)), str(round(h1["ra"], 2)), str(round(h1["ll"], 2)), str(round(h1["rl"], 2))), inline=True)
-            embed.add_field(name="{}'s Wounds".format(self.p1.name), value=self.p1.listWounds(), inline=True)
-        #embed.add_field(name=" ",value=" ",inline=False)
-        if not self.p2.isPlayer:
-            h2 = self.p2.health
-            embed.add_field(name="{}'s Health".format(self.p2.name), value="HP: {}\nHead: {}\nTorso: {}\nLeft Arm: {}\nRight Arm: {}\nLeft Leg: {}\nRight Leg: {}\n".format(str(round(h2["HP"], 2)), str(round(h2["h"], 2)), str(round(h2["t"], 2)), str(round(h2["la"], 2)), str(round(h2["ra"], 2)), str(round(h2["ll"], 2)), str(round(h2["rl"], 2))), inline=True)
-            embed.add_field(name="{}'s Wounds".format(self.p2.name), value=self.p2.listWounds(), inline=True)
+        #if self.p1.isPlayer:
+        h1 = self.p1.health    
+        embed.add_field(name="{}'s Health".format(self.p1.name), value="HP: {}\nHead: {}\nTorso: {}\nLeft Arm: {}\nRight Arm: {}\nLeft Leg: {}\nRight Leg: {}\n".format(str(round(h1["HP"], 2)), str(round(h1["h"], 2)), str(round(h1["t"], 2)), str(round(h1["la"], 2)), str(round(h1["ra"], 2)), str(round(h1["ll"], 2)), str(round(h1["rl"], 2))), inline=True)
+        embed.add_field(name="{}'s Wounds".format(self.p1.name), value=self.p1.listWounds(), inline=True)
+        embed.add_field(name="----",value="----",inline=False)
+        #if self.p2.isPlayer:
+        h2 = self.p2.health
+        embed.add_field(name="{}'s Health".format(self.p2.name), value="HP: {}\nHead: {}\nTorso: {}\nLeft Arm: {}\nRight Arm: {}\nLeft Leg: {}\nRight Leg: {}\n".format(str(round(h2["HP"], 2)), str(round(h2["h"], 2)), str(round(h2["t"], 2)), str(round(h2["la"], 2)), str(round(h2["ra"], 2)), str(round(h2["ll"], 2)), str(round(h2["rl"], 2))), inline=True)
+        embed.add_field(name="{}'s Wounds".format(self.p2.name), value=self.p2.listWounds(), inline=True)
         embed.add_field(name="Battle Log", value="\n".join(self.turns), inline=False)
         if self.p1.isPlayer:
             embed.add_field(name="{}'s Moves".format(self.p1.name), value=self.p1.weapon.getMoves(), inline=False)
@@ -372,6 +405,8 @@ class Fight:
         return embed
 
     async def start(self):
+        self.p1.update()
+        self.p2.update()
         self.message = await self.rpg.bot.send_message(self.channel, embed=self.updatemsg())
         return await self.nextTurn()
 
@@ -392,22 +427,27 @@ class Fight:
             if attack.overlap < 0:
                 damage =  Wound("blunt", attack.target, 0, "{} was too far away to use their weapon!".format(attacker.name))
                 return damage
-            pressure = attack.weapon.blade[attack.type]["sharpness"]/100*attacker.strength["arm"]/attack.attack_area # sharpness applied as a multiplier of pressure, effectively dividing the impact area and thus increasing the imapct pressure
+            pressure = attack.weapon.blade[attack.type]["sharpness"]/100*attacker.strength["arm"]/attack.attack_area # sharpness applied as a multiplier, effectively dividing the impact area and thus increasing the imapct pressure
+            print("pressure: "+str(pressure))
             if pressure > armour.cut_threshold:
                 if attack.type == "strike":
                     cut_size = random.random()*body_part[attack.target]["size"]*armour.cut_resistance
                     cut_depth = random.random()*attack.energy*armour.cut_resistance
-                    damage = Wound("cut", attack.target, [cut_size, cut_depth], "{} lands a cut on {}'s {}.".format(attacker.name, defender.name, body_part[attack.target]["name"]))
+                    damage = Wound("cut", attack.target, [cut_size, cut_depth], "{} lands a cut on {}'s {}.".format(attacker.name, defender.name, body_part[attack.target]["name"]), pressure=pressure)
                 else:
-                    damage = Wound("stab", attack.target, [attack.weapon.blade["stab"]["area"], sigmoid(pressure*attack.momentum)*attack.weapon.blade["length"]], "{} successfully stabs {} in the {} with their {}.".format(attacker.name, defender.name, body_part[attack.target]["name"], attack.weapon.name))
+                    damage = Wound("stab", attack.target, [attack.weapon.blade["stab"]["area"], sigmoid(pressure*attack.momentum)*attack.weapon.blade["length"]], "{} successfully stabs {} in the {} with their {}.".format(attacker.name, defender.name, body_part[attack.target]["name"], attack.weapon.name), pressure=pressure)
             else:
-                damage =  Wound("blunt", attack.target, 0, "{} couldn't pierce {}'s armour, but still dealt blunt damage to their {}.".format(attacker.name, defender.name, body))
+                damage =  Wound("blunt", attack.target, 0, "{} couldn't pierce {}'s armour, but still dealt blunt damage to their {}.".format(attacker.name, defender.name, body), pressure=pressure)
             return damage
         if success(attack, defense):
+            skull_strength = 10
             defender.stance = Stance(defender, body_part[attack.target]["pos"]+[1, 0])
             damage = calcDamage(attack, defender.armour[attack.target])
             text = damage.text
             defender.applyDamage(damage)
+            if hasattr(damage, "pressure") and damage.pressure > skull_strength and damage.location == "h":
+                text += "\n{}'s skull was broken!".format(defender.name)
+                defender.health["h"] -= 65
             defender.applyDamage(Wound("blunt", attack.target, attack.momentum, ""))
         else:
             text = "{} successfully blocked {}'s attack!".format(defender.name, attacker.name)
@@ -421,14 +461,16 @@ class Fight:
         if self.p1.isPlayer:
             self.status = "{}'s turn. They have 10 seconds to respond.".format(self.p1.name)
             await self.rpg.bot.edit_message(self.message, embed=self.updatemsg())
-            action1 = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.p1.ID), self.channel)
+            action1 = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.p1.ID), self.channel, timelimit=10)
             if not action1 == None:
                 action1 = action1.split(" ")
                 if not action1[0].lower() in self.p1.weapon.attacks and not action1[0] == "defend" and not action1[0] == "flee":
-                    action1 = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.p1.ID), self.channel, "That's not a move you can do. You took no action this turn.")
+                    action1 = await self.rpg.bot.send_message(self.channel, "That's not a move you can do. You defended this turn.")
                 elif action1[0].lower() in self.p1.weapon.attacks:
                     action1 = [self.p1.weapon.attacks[action1[0].lower()]]+[action1[1]]
             else:
+                msg = await self.rpg.bot.send_message(self.channel, "{} timed out.".format(self.p1.name))
+                await self.rpg.deletemsg(msg, 2)
                 action1 = ["defend", "t"]
         else:
             action1 = self.p1.ai.action(self)
@@ -437,7 +479,7 @@ class Fight:
         if self.p2.isPlayer:
             self.status = "{}'s turn. They have 10 seconds to respond.".format(self.p2.name)
             await self.rpg.bot.edit_message(self.message, embed=self.updatemsg())
-            action2 = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.p2.ID), self.channel)
+            action2 = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.p2.ID), self.channel, timelimit=10)
             if not action2 == None:
                 action2 = action2.split(" ")
                 if not action2[0].lower() in self.p2.weapon.attacks and action2[0] == "defend" and not action2[0] == "flee":
@@ -446,26 +488,28 @@ class Fight:
                 elif action2[0].lower() in self.p2.weapon.attacks:
                     action2 = [self.p2.weapon.attacks[action2[0].lower()]]+[action2[1]]
             else:
+                msg = await self.rpg.bot.send_message(self.channel, "{} timed out.".format(self.p2.name))
+                await self.rpg.deletemsg(msg, 2)
                 action2 = ["defend","t"]
         else:
             action2 = self.p2.ai.action(self)
             action2 = action2.split(" ")
             action2 = [action2[0].lower()]+[action2[1]]
         if action1[0] == "defend":
-            self.p1.buffs["reactionspeed"] = 0.7
+            self.p1.buffs["reactionspeed"] = 0.5
         else:
             self.p1.buffs["reactionspeed"] = 1
         if action2[0] == "defend":
-            self.p2.buffs["reactionspeed"] = 0.7
+            self.p2.buffs["reactionspeed"] = 0.5
         else:
             self.p1.buffs["reactionspeed"] = 1
         attack1 = None
         attack2 = None
         if not action1[0] == "defend" and not action1[0] == "flee":
             attack1 = Attack(self.p1, distance, self.p1.weapon, action1[0], action1[1])
-        if not action2[0] == "defend" and not not action2[0] == "flee":
+        if not action2[0] == "defend" and not action2[0] == "flee":
             attack2 = Attack(self.p2, distance, self.p2.weapon, action2[0], action2[1])
-        if not attack1 == None:
+        if not attack1 == None and not self.p1.isDead():
             defense2 = Defense(self.p2, self.p2.weapon, self.p2.stance, attack1)
             result1 = await self.resolveAttack(attack1, defense2, self.p1, self.p2)
             self.turns.append(result1[2])
@@ -486,7 +530,162 @@ class Fight:
         await self.rpg.bot.edit_message(self.message, embed=self.updatemsg())
         return await self.nextTurn()
         
-        
+class Conversation:
+    def __init__(self, rpg, channel, p1, p2):
+        self.rpg = rpg
+        self.p1 = p1
+        self.p2 = p2
+        self.channel = channel
+        self.talker = p2
+        self.listener = p1
+        self.currentDialogue = "..."
+        self.options = ["Hello.", "Goodbye."]
+        self.state = "dialogue"
+        self.modules = []
+        self.over = False
+        self.firstTurn = True
+
+    def updatemsg(self):
+        embed = discord.Embed(title="Conversation between {} and {}\n\n{}:".format(self.p1.name, self.p2.name, self.talker.name), description="\""+self.currentDialogue+"\"", color=0x0263ff)
+        if self.state == "dialogue":
+            embed.add_field(name="Options", value=self.rpg.listArr(self.options, numbered=True))
+        if self.state == "shop":
+            selling1 = self.p1.selling
+            selling2 = self.p2.selling
+            selling1 = self.rpg.listItems(list(filter(lambda i: i.itemID in selling1, self.p1.inv)))
+            selling2 = self.rpg.listItems(list(filter(lambda i: i.itemID in selling2, self.p2.inv)))
+            if selling1 == "":
+                selling1 = "No items."
+            if selling2 == "":
+                selling2 = "No items."
+            buying1 = self.rpg.listArr({k: items[k]["name"]+" for "+str(v)+" coins each" for k, v in self.p1.buying.items()}.values())
+            buying2 = self.rpg.listArr({k: items[k]["name"]+" for "+str(v)+" coins each" for k, v in self.p2.buying.items()}.values())
+            if buying1 == "":
+                buying1 = "No items."
+            if buying2 == "":
+                buying2 = "No items."
+            embed.add_field(name="{}'s balance:".format(self.p1.name), value=self.p1.balance(mode="str"), inline=True)
+            embed.add_field(name="{}'s balance:".format(self.p2.name), value=self.p2.balance(mode="str"), inline=True)
+            embed.add_field(name="\u200b", value="\u200b", inline=False)
+            embed.add_field(name="What {} has to offer:".format(self.p1.name), value=selling1, inline=True)
+            embed.add_field(name="What {} has to offer:".format(self.p2.name), value=selling2, inline=True)
+            embed.add_field(name="\u200b", value="\u200b", inline=False)
+            embed.add_field(name="What {} wants to buy:".format(self.p1.name), value=buying1, inline=True)
+            embed.add_field(name="What {} wants to buy:".format(self.p2.name), value=buying2, inline=True)
+            embed.add_field(name="Options", value="Type \"nevermind\" to cancel the trade.\nTo sell something, type sell (amount) (item name).\nTo sell something, type buy (amount) (item name).", inline=False)
+        return embed
+    async def processDialogue(self):
+        if self.currentDialogue.lower().startswith("goodbye"):
+            self.over = True
+            return
+        if self.currentDialogue.lower().startswith("i'd like to buy") or self.currentDialogue.lower().startswith("i'd like to sell"):
+            self.talker, self.listener = self.listener, self.talker
+            self.state = "shop"
+            return
+        if self.listener.isPlayer:
+            choice = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.listener.ID), self.channel, prompt=None, returncontent=False)
+            if not self.firstTurn:
+                await self.rpg.bot.delete_message(choice)
+            choice = choice.content
+            if not choice.isdigit():
+                await self.rpg.bot.send_message(ctx.message.channel, "Invalid selection. Cancelled dialogue.")
+            if int(choice) > len(self.options):
+                await self.rpg.bot.send_message(ctx.message.channel, "Invalid selection. Cancelled dialogue.")
+            self.currentDialogue = self.options[int(choice) - 1]
+            self.options = ["Continue."]
+        else:
+            confirm = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.talker.ID), self.channel, prompt=None, returncontent=False)
+            if not self.firstTurn:
+                await self.rpg.bot.delete_message(confirm)
+            if self.currentDialogue in self.listener.dialogue["options"]:
+                self.options = [uppercase(o) for o in self.listener.dialogue["options"][self.currentDialogue]]+["Goodbye."]
+            else:
+                self.options = ["I'd like to buy something.", "I'd like to sell something.", "Goodbye."]+self.listener.dialogue["options"]["default"]
+            self.currentDialogue = self.listener.dialogue["responses"][self.currentDialogue]
+        self.talker, self.listener = self.listener, self.talker
+
+    async def processShop(self):
+        self.currentDialogue = "Let's see what you got."
+        choice = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.listener.ID), self.channel, prompt=None)
+        if choice.lower().startswith("nevermind"):
+            self.state = "dialogue"
+            self.currentDialogue = "..."
+            self.options = ["Goodbye"]
+            if "default" in self.talker.dialogue["options"]:
+                self.options = self.options + self.talker.dialogue["options"]["default"]
+            return
+        if choice.lower().startswith("sell"):
+            amount = choice.split(" ")[1]
+            if not amount.isdigit() or int(amount) < 1:
+                return await self.rpg.bot.send_message(self.channel, "That's not a valid amount.")
+            itemname = " ".join(choice.split(" ")[2:])
+            item = None
+            for x in items:
+                if items[x]["name"] == itemname.lower():
+                    item = items[x]
+                    break
+            if item == None:
+                return await self.rpg.bot.send_message(self.channel, "There is no such item.")
+            print(itemname)
+            if self.talker.isPlayer:
+                return await self.rpg.bot.send_message(self.channel, "This player isn't buying any items.")
+            if not item.itemID in self.talker.buying:
+                return await self.rpg.bot.send_message(self.channel, "This player isn't interested in that.")
+            if self.talker.balance() < self.talker.buying[item.itemID]*int(amount):
+                return await self.rpg.bot.send_message(self.channel, "{} can't afford that much.".format(self.talker.name))
+            for index, item in enumerate(self.listener.inv):
+                if item.name.lower() == itemname.lower():
+                    if item.amount < int(amount):
+                        return await self.rpg.bot.send_message(self.channel, "You don't have enough items for that.")
+                        self.rpg.removeItem(self.talker.inv, Item("coin"), amount=self.talker.buying[itemname]*int(amount))
+                        self.rpg.removeItem(self.listener.inv, item, amount=int(amount))
+                    return await self.rpg.bot.send_message(self.channel, "{} sold {} {} to {}.".format(self.listener.name, amount, uppercase(itemname), self.talker.name))
+            return await self.rpg.bot.send_message(self.channel, "You don't have that item.")
+        if choice.lower().startswith("buy"):
+            amount = choice.split(" ")[1]
+            if not amount.isdigit() or int(amount) < 1:
+                return await self.rpg.bot.send_message(self.channel, "That's not a valid amount.")
+            itemname = " ".join(choice.split(" ")[2:])
+            for x in items:
+                if items[x]["name"] == itemname.lower():
+                    itemname = x
+                    break
+            if self.talker.isPlayer:
+                return await self.rpg.bot.send_message(self.channel, "This player isn't selling any items.")
+            if not itemname in self.talker.selling:
+                return await self.rpg.bot.send_message(self.channel, "This player isn't selling that item.")
+            if self.listener.balance() < self.talker.selling[itemname]*int(amount):
+                return await self.rpg.bot.send_message(self.channel, "{} can't afford that much.".format(self.listener.name))
+            for index, item in enumerate(self.talker.inv):
+                if item.name.lower() == itemname.lower():
+                    if item.amount < int(amount):
+                        return await self.rpg.bot.send_message(self.channel, "{} doesn't have enough items for that.".format(self.talker.name))
+                        self.rpg.removeItem(self.listener.inv, Item("coin"), amount=self.listener.selling[itemname]*int(amount))
+                        self.rpg.removeItem(self.talker.inv, item, amount=int(amount))
+                    return await self.rpg.bot.send_message(self.channel, "{} sold {} {} to {}.".format(self.talker.name, amount, uppercase(itemname), self.listener.name))
+            return await self.rpg.bot.send_message(self.channel, "{} doesn't have that item.".format(self.talker.name))
+
+    async def start(self):
+        self.message = await self.rpg.bot.send_message(self.channel, embed=self.updatemsg())
+        return await self.nextTurn()
+    async def nextTurn(self):
+        if self.state == "dialogue":
+            await self.processDialogue()
+        if self.state == "shop":
+            await self.processShop()
+        await self.rpg.bot.edit_message(self.message, embed=self.updatemsg())
+        self.firstTurn = False
+        if self.p1.name == self.listener.name:
+            self.p1 = self.listener
+            self.p2 = self.talker
+        else:
+            self.p2 = self.listener
+            self.p1 = self.talker
+        if self.over:
+            await self.rpg.bot.send_message(self.channel, "Ended conversation.")
+            return [self.p1, self.p2]
+        return await self.nextTurn()
+
 class ChillRPG:
     """Class holding game information, methods and player interaction."""
     def __init__(self, bot):
@@ -495,11 +694,12 @@ class ChillRPG:
         self.locations = read_folder("locations") #dictionary of all json files in data/crpg/locations/
         self.no = ["no", "n"]
         self.startkits = [[Item("pitchfork01", {"amount":1})],
-                          [Item("steel_axe01", {"amount":1})],
+                          [Item("steel_axe01", {"amount":1}), Item("timber01", {"amount":100})],
                           [Item("steel_spear01", {"amount":1})],
-                          [Item("steel_armingsword01", {"amount":1})]]
+                          [Item("steel_armingsword01", {"amount":1})],
+                          [Item("steel_armingsword01", {"amount":1}),Item("steel_mace01", {"amount":1})]]
         self.startInv = [Item("fist", {"amount":2}), Item("clean_bandage", {"amount":5}), Item("waterskin", {"amount":1}), Item("bread_chunk", {"amount":10})]
-        self.materials = [Material("mild_steel", True, 70, 370, 8050)]
+        self.materials = [Material("mild_steel", 4, 5, True, 70, 370, 8050)]
         self.defaultNPCinfo = fileIO("data/crpg/default_npc.json", "load")
         self.defaultNPCinfo["weapon"] = (Item("steel_axe01", {"amount":1}))
         self.bp_names = {
@@ -510,7 +710,17 @@ class ChillRPG:
             "left leg":"ll",
             "right leg":"rl"
         }
-        self.players = {}
+        self.players = {**read_folder('npcs', filetype="obj"), **read_folder('players', filetype="obj")}
+        ginger = fileIO("data/crpg/ginger.json", "load")
+        ginger = Player(ginger, isPlayer=False)
+        self.players[ginger.ID] = ginger
+        ginger.inv = [Item("bread_chunk", {"amount":250}), Item("clean_bandage", {"amount":750})]
+        ginger.save()
+        print(ginger.name)
+        for x in self.players:
+            location = self.locations[self.players[x].location]
+            location["players"].append(self.players[x].ID)
+        print(self.locations["chillbar"]["players"])
 
     def refreshInv(self, inv):
         for x in inv.length:
@@ -524,30 +734,36 @@ class ChillRPG:
 
     async def addItem(self, inv, item):
         for x in inv:
-            if x.id == item.id:
-                x.amount += 1
+            if x.itemID == item.itemID:
+                x.amount += item.amount
                 return inv
         inv.append(item)
         return inv
 
-    async def removeItem(self, inv, item):
+    async def removeItem(self, inv, item, amount=1):
         for x in inv:
-            if x.id == item.id:
-                x.amount -= 1
+            if x.itemID == item.itemID:
+                x.amount -= amount
                 if x.amount <= 0:
                     del(x)
                     return inv
         return inv
 
-    async def getPlayer(self, ID, ctx): #Get a user's character, if it exists
+    async def getPlayer(self, ID, ctx, someone_else=False): #Get a user's character, if it exists
         if ID in self.players:
             self.players[ID].update()
+            if not ID in self.locations[self.players[ID].location]["players"]:
+                self.locations[self.players[ID].location]["players"].append(ID)
             return self.players[ID]
         if os.path.exists("data/crpg/players/{}".format(ID)):
             self.players[ID] = loadPickle("data/crpg/players/{}/info.obj".format(ID))
+            if not ID in self.locations[self.players[ID].location]["players"]:
+                self.locations[self.players[ID].location]["players"].append(ID)
             self.players[ID].update()
             return self.players[ID]
         else:
+            if someone_else:
+                return None
             prompt = "You haven't created a character yet, or your previous one is deceased. Would you like to create a new character?"
             response = await self.promptUser(ctx.message.author, ctx.message.channel, prompt)
             if response.lower() in self.yes:
@@ -586,7 +802,7 @@ class ChillRPG:
             await self.bot.send_message(channel, "Restarting character creation...")
             return await self.newPlayer(user, channel)
 
-    async def promptUser(self, author, channel, prompt=None, embed=None, timelimit=None):
+    async def promptUser(self, author, channel, prompt=None, embed=None, timelimit=None, returncontent=True):
         if not prompt == None:
             await self.bot.send_message(channel, prompt, embed=embed)
         elif not embed == None:
@@ -594,10 +810,16 @@ class ChillRPG:
         response = await self.bot.wait_for_message(timeout=timelimit, author=author, channel=channel)
         if response == None:
             return None
-        return response.content
+        if returncontent:
+            return response.content
+        return response
 
     async def newFight(self, p1, p2, ctx):
         return Fight(p1, p2, self, ctx.message.channel)
+
+    async def deletemsg(self, message, delay):
+        asyncio.sleep(delay)
+        return await self.bot.delete_message(message)
 
     def listItems(self, inv, numbered=False, Filter=None):
         content = ""
@@ -610,17 +832,35 @@ class ChillRPG:
             content += "\n{} {} x {}".format(marker, item.name, item.amount)
         return content
 
-    def listStats(self, player):
-        content = "Health: {}\nHead: {}\nTorso: {}\nLeft Arm: {}\nRight Arm: {}\nLeft Leg: {}\nRight Leg: {}\n"
+    def listLocations(self):
+        content = ""
+        for k in self.locations:
+            content += "\n**{}** : {}".format(self.locations[k]["name"], self.locations[k]["description"])
+        return content
+
+    def getPlayerSync(self, ID, someone_else=False): #Get a user's character, if it exists
+        if ID in self.players:
+            self.players[ID].update()
+            if not ID in self.locations[self.players[ID].location]["players"]:
+                self.locations[self.players[ID].location]["players"].append(ID)
+            return self.players[ID]
+        else:
+            return None
+
+    def listHealth(self, player):
+        h1 = player.health
+        return "HP: {}\nHead: {}\nTorso: {}\nLeft Arm: {}\nRight Arm: {}\nLeft Leg: {}\nRight Leg: {}\n".format(str(round(h1["HP"], 2)), str(round(h1["h"], 2)), str(round(h1["t"], 2)), str(round(h1["la"], 2)), str(round(h1["ra"], 2)), str(round(h1["ll"], 2)), str(round(h1["rl"], 2)))
 
     def statusEmbed(self, player):
+        player.update()
         embed = discord.Embed(title="{}'s Status".format(player.name), color=0x16ff64)
         if player.isDead():
             embed.add_field(name="You are dead!", value="You can't do much now that you're not alive.", inline=False)
-        embed.add_field(name="Stats", value="Health: {}\nStamina: {}\nFatigue: {}\nLevel: {}\nBalance: {}\n".format(player.health["HP"], player.stamina, player.fatigue, player.level, player.balance), inline=False)
+        embed.add_field(name="Health", value=self.listHealth(player), inline=False)
+        embed.add_field(name="Stats", value="Stamina: {}\nFatigue: {}\nLevel: {}\nBalance: {}\n".format(player.stamina, player.fatigue, player.level, player.balance()), inline=False)
         embed.add_field(name="Wounds", value="At this rate, you will bleed out {}\n".format(player.timeLeft())+player.listWounds(), inline=True)
         embed.add_field(name="Equipment", value="Weapon: {}".format(player.weapon.name), inline=True)
-        embed.add_field(name="Location", value="{}".format(self.locations[player.location]["description"]), inline=False)
+        embed.add_field(name="Location\n"+self.locations[player.location]["name"], value="{}".format(self.locations[player.location]["description"]), inline=False)
         return embed
 
     def iteminfo(self, item):
@@ -636,6 +876,23 @@ class ChillRPG:
         embed = discord.Embed(title=item.name, description=description, color=0x000ed8)
         return embed
 
+    async def listPlayers(self, ctx, location):
+        content = ""
+        for x in location["players"]:
+            player = await self.getPlayer(x, ctx)
+            content += "{}\n".format(player.name)
+        return content
+    def listArr(self, arr, numbered=False):
+        content = ""
+        i = 0
+        marker = ""
+        for x in arr:
+            if numbered:
+                i += 1
+                marker = str(i)+". "
+            content += "\n"+marker+x
+        return content
+
     @commands.command(pass_context=True)
     async def inventory(self, ctx):
         player = await self.getPlayer(ctx.message.author.id, ctx)
@@ -650,7 +907,9 @@ class ChillRPG:
     @commands.command(pass_context=True)
     async def fight(self, ctx):
         player1 = await self.getPlayer(ctx.message.author.id, ctx)
-        player2 = await self.getPlayer(ctx.message.mentions[0].id, ctx)
+        player2 = await self.getPlayer(ctx.message.mentions[0].id, ctx, someone_else=True)
+        if player2 == None:
+            return
         fight = Fight(player1, player2, self, ctx.message.channel)
         result = await fight.start()
         player1 = result[0]
@@ -696,8 +955,10 @@ class ChillRPG:
     @commands.command(pass_context=True)
     async def equip(self, ctx):
         player = await self.getPlayer(ctx.message.author.id, ctx)
+        if len(ctx.message.content.split(" ")) < 3:
+            return await self.bot.send_message(ctx.message.channel, "Equip what?")
         if ctx.message.content.split(" ")[1] == "weapon":
-            success = player.changeEquip(ctx.message.content[7:])
+            success = player.changeEquip(ctx.message.content[14:])
             if success:
                 await self.bot.send_message(ctx.message.channel, embed=discord.Embed(title="Success", description="Set your weapon to {}.".format(player.weapon.name), color=0x16ffeb))
             else:
@@ -728,8 +989,64 @@ class ChillRPG:
         selection1 = int(selection1) - 1
         selection2 = int(selection2) - 1
         player.wounds[selection2].bandage()
-        await self.removeItem(player.inv, inv[selection1].id)
+        await self.removeItem(player.inv, inv[selection1])
         player.save()
+
+    @commands.command(pass_context=True)
+    async def goto(self, ctx):
+        player = await self.getPlayer(ctx.message.author.id, ctx)
+        new_location = None
+        for n in self.locations:
+            if self.locations[n]["name"].lower() == ctx.message.content[6:].lower():
+                new_location = n
+        if new_location == None:
+            return await self.bot.send_message(ctx.message.channel, "That location doesn't exist on your map.")
+        k = player.location
+        if k == n:
+            return await self.bot.send_message(ctx.message.channel, "You're already there.")
+        self.locations[k]["players"].remove(ctx.message.author.id)
+        self.locations[n]["players"].append(ctx.message.author.id)
+        player.location = self.locations[n]["id"]
+        await self.bot.send_message(ctx.message.channel, "You arrived at {} in one piece.".format(self.locations[n]["name"]))
+        player.save()
+
+    @commands.command(pass_context=True)
+    async def people(self, ctx):
+        player = await self.getPlayer(ctx.message.author.id, ctx)
+        embed = discord.Embed(title="People currently in {}".format(self.locations[player.location]["name"]), description=await self.listPlayers(ctx, self.locations[player.location]), color=0xff1e69)
+        await self.bot.send_message(ctx.message.channel, embed=embed)
+
+    @commands.command(pass_context=True)
+    async def talk(self, ctx):
+        player1 = await self.getPlayer(ctx.message.author.id, ctx)
+        location = self.locations[player1.location]
+        options = [p for p in location["players"] if not self.getPlayerSync(p) == None and self.getPlayerSync(p).name.lower() == ctx.message.content[6:].lower()]
+        if len(options) == 0:
+            return await self.bot.send_message(ctx.message.channel, "That person isn't present.")
+        if len(options) > 1:
+            return await self.bot.send_message(ctx.message.channel, "There is more than one person with that name.")
+            #names = map((lambda o: if hasattr(self.getPlayerSync(o), identifier): self.getPlayerSync(o).name+", "+self.getPlayerSync(o).identifier else: self.getPlayerSync(o).name), options)
+            embed = discord.Embed(title="People with the name {}:".format(ctx.message.content[6:]), description=self.listArr(names, numbered=True))
+            choice = await self.promptUser(ctx.message.author, ctx.message.channel, embed=embed)
+            if not choice.isdigit():
+                return await self.bot.send_message(ctx.message.channel, "Invalid selection.")
+            if choice > options.length:
+                return await self.bot.send_message(ctx.message.channel, "Invalid selection.")
+            player2 = await self.getPlayer(options[int(choice) - 1], ctx, someone_else=True)
+        else:
+            player2 = await self.getPlayer(options[0], ctx, someone_else=True)
+        conversation = Conversation(self, ctx.message.channel, player1, player2)
+        result = await conversation.start()
+        player1 = result[0]
+        player2 = result[1]
+        player1.save()
+        player2.save()
+
+    @commands.command(pass_context=True)
+    async def map(self, ctx):
+        player = await self.getPlayer(ctx.message.author.id, ctx)
+        embed = discord.Embed(title="Locations", description=self.listLocations(), color=0xff1e69)
+        await self.bot.send_message(ctx.message.channel, embed=embed)
 
     @commands.command(pass_context=True)
     async def begin(self, ctx):
@@ -755,15 +1072,18 @@ def check_folders():
         os.makedirs("data/crpg/players")
         fileIO("data/crpg/default_player.json", "save", {})
 
-def read_folder(path):
+def read_folder(path, filetype="json"):
     d = {}
-    print("....")
-    for filename in glob.glob("data/crpg/{}/*.json".format(path)):
-        d[os.path.basename(filename)[:-5]] = fileIO(filename, "load")
+    for root, directories, filenames in os.walk("data/crpg/{}".format(path)):
+        for filename in filenames: 
+            if filetype == "json":
+                d[filename[:-5]] = fileIO(os.path.join(root,filename), "load")
+            elif filetype == "obj":
+                d[filename[:-4]] = loadPickle(os.path.join(root,filename))
     return d     
 
 def setup(bot):
     global items
-    items = read_folder("items/*")
+    items = read_folder("items")
     n = ChillRPG(bot)
     bot.add_cog(n)
