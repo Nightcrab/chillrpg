@@ -4,7 +4,7 @@
 	"bladed":true,
 	"length":3,
 	"mass": 2.1,
-	"balance":15,
+	"balance":0.7,
 	"description": "It's a 3 meter stick of wood with a 20cm, semi-sharp but maintained steel tip. A soldier's weapon.",
 	"blade": {
 		"mass": 1.1,

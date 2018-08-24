@@ -51,7 +51,7 @@ class Player:
         for key in info:
             setattr(self, key, info[key])
         if not "stance" in info:
-            self.stance = Stance(self, [0,0,1,1])
+            self.stance = Stance(self, [0,0,1,1,90,90])
         if not "armour" in info:
             self.armour = {
             "h" : Item("skin", {"amount":1}),
@@ -65,6 +65,8 @@ class Player:
 
     def isDead(self):
         if self.health["h"] <= 0:
+            return True
+        if self.health["t"] <= 0:
             return True
         if self.health["HP"] <= 0:
             return True
@@ -130,7 +132,6 @@ class Player:
         return 0
 
     def update(self):
-
         for key in default_player:
             if not hasattr(self, key):
                 setattr(self, key, default_player[key])
@@ -143,9 +144,10 @@ class Player:
         if not hasattr(self, "lastUpdate"):
             self.lastUpdate = time.time()
         self.health["HP"] += self.bloodgain
-        #self.hunger += 0.005*(time.time() - self.lastUpdate)
         for x in self.wounds:
             x.update()
+            if hasattr(x, "healed") and x.healed:
+                self.wounds.remove(x)
             if x.bleed > 0:
                 self.health["HP"] -= x.bleed * (time.time() - self.lastUpdate)
         for x in self.health:
@@ -157,11 +159,12 @@ class Player:
                 continue
             self.health[x] += body_part[x]["healrate"] * (time.time() - self.lastUpdate)
         self.lastUpdate = time.time()
+        self.save()
 
     def invmass(self):
         s = 0
         for x in self.inv:
-            s += x.mass
+            s += x.mass*x.amount
         return s
 
     def save(self):
@@ -240,7 +243,9 @@ class Stance:
         self.x = code[0]*0.3 #-1 left 0 middle 1 right
         self.y = code[1]*0.7 #-1 bottom 0 middle 1 top
         self.z = code[2]*player.proportions["arm"]/4 #1 close 2 neutral 3 forward 4 overextended
-        self.line = code[3]
+        self.rotx = code[3]
+        self.rotz = code[4]
+        self.line = code[6]
         self.name = ""
         if self.x > 0:
             self.name += "Right, "
@@ -285,12 +290,17 @@ class Attack:
         print("type : "+self.type)
         self.stance = player.stance
         self.target = target
-        dz = p_distance - self.stance.z
-        dx = self.stance.x - body_part[target]["pos"][0]
-        dy = self.stance.y - body_part[target]["pos"][1]
+        self.angle = random.choice([180, 0, 90, 270]) #left, right, up and down; left as in from the left, not to the left
+        self.destination = body_part[target]["pos"]+[player.proportions["arm"]]+[self.angle]+[player.stance.rotz]
+        dz = self.destination[2] - self.stance.z
+        dx = self.stance.x - self.destination[0]
+        dy = self.stance.y - self.destination[1]
         d1 = math.sqrt(dx*dx+dy*dy)
         self.distance = math.sqrt(dz*dz+d1*d1)
         self.weapon = weapon
+
+        com_dist = self.weapon.length*self.weapon.balance
+        self.rot_speed = 
         w_overlap = self.weapon.length - self.distance
         if self.weapon.blade["length"] > w_overlap:
             self.overlap = w_overlap
@@ -300,18 +310,21 @@ class Attack:
             w_acceleration = player.strength["arm"]/weapon.mass
             b_acceleration = player.strength["legs"]/(player.mass+player.invmass()+weapon.mass)
             self.velocity = math.sqrt(2*w_acceleration*(self.distance+self.stance.lungelen()))
+            self.weapon_velocity = self.velocity
             self.acceleration = w_acceleration + b_acceleration
             self.attack_area = weapon.blade["stab"]["area"]
         
         if atktype == "strike":
             self.acceleration = player.strength["arm"]/weapon.mass
             self.velocity = math.sqrt(2*self.acceleration*self.distance)
+            self.weapon_velocity = self.velocity
             if not "area" in weapon.blade["strike"]:
                 self.attack_area = self.overlap
             else:
                 self.attack_area = weapon.blade["strike"]["area"]
         self.energy = 1/2*self.weapon.blade["mass"]*self.velocity*self.velocity
         self.momentum = self.weapon.blade["mass"]*self.velocity
+        self.time = 2*self.distance/self.velocity
 
 class Defense:
     """Determines the effectiveness of an attack."""
@@ -319,14 +332,16 @@ class Defense:
         self.type = player.ai.defend(player.weapon, attack)
         self.weapon =  weapon
         self.stance = stance
+
         def limb_lag(health):
             x = (100-health)
             return 5 ** (x/10-2)
         self.reaction = player.combat_stats["reactionspeed"]*player.buffs["reaction"]+limb_lag(player.health[attack.target])
         print("buff {} speed {} lag {}".format(player.buffs["reaction"], player.combat_stats["reactionspeed"], limb_lag(player.health[attack.target])))
-        self.destination = body_part[attack.target]["pos"]+[0]
+        xrot = attack.destination[]
+        self.destination = body_part[attack.target]["pos"]+self.player.proportions["arm"]/4+[xrot, zrot]
         self.distance = distance3D([self.stance.x, self.stance.y, self.stance.z], self.destination)
-        self.velocity = player.combat_stats["reflex_speed"]*weapon.balance/100
+        
 
 class Wound:
     def __init__(self, _type, location, value, text, pressure=None):
@@ -346,13 +361,22 @@ class Wound:
             self.bleed = self.value[1]*bloodloss_modifier
 
     def severity(self):
-        if self.type == "cut":
-            if self.value[0] > 0.2 or self.value[1] > 0.1:
-                return "severe"
-        elif self.type == "stab":
-            if self.value > 0.2:
-                return "severe"
-        return "mild"
+        if self.bleed == 0:
+            self.healed = True
+            return "healed"
+        return "severe"
+        if 0 < self.bleed <= 1:
+            return "minor"
+        if 1 < self.bleed <= 2:
+            return "mild"
+        if 2 < self.bleed <= 5:
+            return "moderately severe"
+        if 5 < self.bleed <= 15:
+            return "severe"
+        if 15 < self.bleed <= 50:
+            return "fatal"
+        if 50 < self.bleed:
+            return "all of your blood vessels were destroyed by this"
 
     def bandage(self):
         self.bandaged = True
@@ -371,14 +395,23 @@ class Fight:
     def __init__(self, player1, player2, chillrpg, channel):
         self.p1 = player1
         self.p2 = player2
-        self.p1.pos = -0.2
-        self.p2.pos = 0.2
+        self.p1.pos = -0.4
+        self.p2.pos = 0.4
+        self.normal_moves = ["defend", "flee", "move"]
         self.distance = abs(self.p1.pos)+abs(self.p2.pos)
         self.rpg = chillrpg
         self.channel = channel
         self.turns = ["The battle began between {} and {}.".format(self.p1.name, self.p2.name)]
         self.logLength = 10
         self.status = "No action has been taken."
+        self.names = {
+            "head":"h",
+            "leftarm":"la",
+            "rightarm":"ra",
+            "leftleg":"ll",
+            "rightleg":"rl",
+            "torso":"t"
+        }
 
     def updatemsg(self):
         if len(self.turns) > 10:
@@ -398,10 +431,11 @@ class Fight:
         embed.add_field(name="{}'s Wounds".format(self.p2.name), value=self.p2.listWounds(), inline=True)
         embed.add_field(name="Battle Log", value="\n".join(self.turns), inline=False)
         if self.p1.isPlayer:
-            embed.add_field(name="{}'s Moves".format(self.p1.name), value=self.p1.weapon.getMoves(), inline=False)
+            embed.add_field(name="{}'s Moves".format(self.p1.name), value=self.p1.weapon.getMoves()+self.rpg.listArr(self.normal_moves, upper=True), inline=False)
         if self.p2.isPlayer:
-            embed.add_field(name="{}'s Moves".format(self.p2.name), value=self.p2.weapon.getMoves(), inline=False)
+            embed.add_field(name="{}'s Moves".format(self.p2.name), value=self.p2.weapon.getMoves()+self.rpg.listArr(self.normal_moves, upper=True), inline=False)
         embed.add_field(name="Battle Status", value=self.status, inline=False)
+        embed.set_footer(text="Send the name of the move you would like to make and a target, e.g 'slice leftarm'")
         return embed
 
     async def start(self):
@@ -412,10 +446,11 @@ class Fight:
 
     async def resolveAttack(self, attack, defense, attacker, defender):
         def success(attack, defense):
-            def_time = defense.distance/defense.velocity+defense.reaction
-            atk_time = attack.distance/attack.velocity+defense.reaction  #super crude defense mechanic, to be reworked with stances later properly
-            print("time to defend {} in stance {} from stance {} with distance {} is {} with limb delay of {}".format(attack.target, defense.stance.name, attack.stance.name, str(defense.distance), str(def_time), str(defense.reaction)))
-            print("time to attack:"+str(atk_time)+" with velocity "+str(attack.velocity)+" and distance "+str(attack.distance))
+            atk_rot_time_x = attack.destination[3]/attack.rotspeed
+            atk_rot_time_z = attack.destination[4]/attack.rotspeed
+            atk_move_time = attack.time
+            atk_rot_time = max(atk_rot_time_z, atk_rot_time_x)
+            atk_time = atk_move_time + atk_rot_time
             if atk_time > def_time:
                 return False
             return True
@@ -435,9 +470,9 @@ class Fight:
                     cut_depth = random.random()*attack.energy*armour.cut_resistance
                     damage = Wound("cut", attack.target, [cut_size, cut_depth], "{} lands a cut on {}'s {}.".format(attacker.name, defender.name, body_part[attack.target]["name"]), pressure=pressure)
                 else:
-                    damage = Wound("stab", attack.target, [attack.weapon.blade["stab"]["area"], sigmoid(pressure*attack.momentum)*attack.weapon.blade["length"]], "{} successfully stabs {} in the {} with their {}.".format(attacker.name, defender.name, body_part[attack.target]["name"], attack.weapon.name), pressure=pressure)
+                    damage = Wound("stab", attack.target, [attack.weapon.blade["stab"]["area"], sigmoid(pressure*attack.momentum)*attack.overlap], "{} successfully stabs {} in the {} with their {}.".format(attacker.name, defender.name, body_part[attack.target]["name"], attack.weapon.name), pressure=pressure)
             else:
-                damage =  Wound("blunt", attack.target, 0, "{} couldn't pierce {}'s armour, but still dealt blunt damage to their {}.".format(attacker.name, defender.name, body), pressure=pressure)
+                damage =  Wound("blunt", attack.target, 0, "{} dealt blunt damage to {}'s {}.".format(attacker.name, defender.name, body_part[attack.target]["name"]), pressure=pressure)
             return damage
         if success(attack, defense):
             skull_strength = 10
@@ -447,7 +482,7 @@ class Fight:
             defender.applyDamage(damage)
             if hasattr(damage, "pressure") and damage.pressure > skull_strength and damage.location == "h":
                 text += "\n{}'s skull was broken!".format(defender.name)
-                defender.health["h"] -= 65
+                self.p2.health["HP"] = 0
             defender.applyDamage(Wound("blunt", attack.target, attack.momentum, ""))
         else:
             text = "{} successfully blocked {}'s attack!".format(defender.name, attacker.name)
@@ -455,22 +490,40 @@ class Fight:
 
     async def nextTurn(self):
         self.distance = abs(self.p1.pos)+abs(self.p2.pos)
-        distance = self.distance
+        self.p1.range = self.p1.stance.z+math.cos(math.radians(self.p1.stance.rotx))*self.p1.weapon.length
+        self.p2.range = self.p2.stance.z+math.cos(math.radians(self.p2.stance.rotx))*self.p2.weapon.length
         if self.p1.isDead() or self.p2.isDead():
             return [self.p1,self.p2]
         if self.p1.isPlayer:
-            self.status = "{}'s turn. They have 10 seconds to respond.".format(self.p1.name)
+            self.status = "{}'s turn. They have 5 seconds to respond.".format(self.p1.name)
             await self.rpg.bot.edit_message(self.message, embed=self.updatemsg())
-            action1 = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.p1.ID), self.channel, timelimit=10)
+            action1 = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.p1.ID), self.channel, timelimit=5)
             if not action1 == None:
                 action1 = action1.split(" ")
-                if not action1[0].lower() in self.p1.weapon.attacks and not action1[0] == "defend" and not action1[0] == "flee":
-                    action1 = await self.rpg.bot.send_message(self.channel, "That's not a move you can do. You defended this turn.")
+                if not action1[0].lower() in self.p1.weapon.attacks and not action1[0].lower() in self.normal_moves or not action1[1].lower() in self.names:
+                    await self.rpg.bot.send_message(self.channel, "That's not a valid move. You defended this turn.")
+                    action1 = ["defend", "t"]
                 elif action1[0].lower() in self.p1.weapon.attacks:
                     action1 = [self.p1.weapon.attacks[action1[0].lower()]]+[action1[1]]
+                elif action1[0].lower() == "move":
+                    if len(action1) < 3:
+                        await self.rpg.bot.send_message(self.channel, "Not enough parameters specified. (requires direction and distance)")
+                    elif not action1[1].lower() == "forward" and not action1[1].lower() == "back":
+                        await self.rpg.bot.send_message(self.channel, "Direction must be forward or back.")
+                    elif not action1[2].isdigit():
+                        await self.rpg.bot.send_message(self.channel, "Distance must be a number, in centimeters.")
+                    elif int(action1[2]) <= 0:
+                        await self.rpg.bot.send_message(self.channel, "Distance can't be 0 or negative.")
+                    else:
+                        if int(action1[2]) > 100:
+                            action1[2] = "100"
+                        if action1[1].lower() == "forward":
+                            self.p1.pos += int(action1[2])/100
+                        else:
+                            self.p1.pos -= int(action1[2])/100
             else:
                 msg = await self.rpg.bot.send_message(self.channel, "{} timed out.".format(self.p1.name))
-                await self.rpg.deletemsg(msg, 2)
+                await self.rpg.deletemsg(msg, 2000)
                 action1 = ["defend", "t"]
         else:
             action1 = self.p1.ai.action(self)
@@ -482,11 +535,27 @@ class Fight:
             action2 = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.p2.ID), self.channel, timelimit=10)
             if not action2 == None:
                 action2 = action2.split(" ")
-                if not action2[0].lower() in self.p2.weapon.attacks and action2[0] == "defend" and not action2[0] == "flee":
-                    action2 = await self.rpg.promptUser(await self.rpg.bot.get_user_info(self.p2.ID), self.channel, "That's not a move you can do. You took no action this turn.")
+                if not action2[0].lower() in self.p2.weapon.attacks and not action2[0].lower() in self.normal_moves or not action2[1].lower() in self.names:
+                    await self.rpg.bot.send_message(self.channel, "That's not a valid move. You defended this turn.")
                     action2 = ["defend", "t"]
                 elif action2[0].lower() in self.p2.weapon.attacks:
                     action2 = [self.p2.weapon.attacks[action2[0].lower()]]+[action2[1]]
+                elif action2[0].lower() == "move":
+                    if len(action2) < 3:
+                        await self.rpg.bot.send_message(self.channel, "Not enough parameters specified. (requires direction and distance)")
+                    elif not action2[1].lower() == "forward" and not action2[1].lower() == "back":
+                        await self.rpg.bot.send_message(self.channel, "Direction must be forward or back.")
+                    elif not action2[2].isdigit():
+                        await self.rpg.bot.send_message(self.channel, "Distance must be a number, in centimeters.")
+                    elif int(action2[2]) <= 0:
+                        await self.rpg.bot.send_message(self.channel, "Distance can't be 0 or negative.")
+                    else:
+                        if int(action2[2]) > 100:
+                            action2[2] = "100"
+                        if action2[1].lower() == "forward":
+                            self.p2.pos += int(action2[2])/100
+                        else:
+                            self.p2.pos -= int(action2[2])/100
             else:
                 msg = await self.rpg.bot.send_message(self.channel, "{} timed out.".format(self.p2.name))
                 await self.rpg.deletemsg(msg, 2)
@@ -505,10 +574,16 @@ class Fight:
             self.p1.buffs["reactionspeed"] = 1
         attack1 = None
         attack2 = None
-        if not action1[0] == "defend" and not action1[0] == "flee":
-            attack1 = Attack(self.p1, distance, self.p1.weapon, action1[0], action1[1])
-        if not action2[0] == "defend" and not action2[0] == "flee":
-            attack2 = Attack(self.p2, distance, self.p2.weapon, action2[0], action2[1])
+        self.distance = abs(self.p1.pos)+abs(self.p2.pos)
+        if self.distance <= 0:
+            self.turns.append("{} and {} collided!".format(self.p1.name, self.p2.name))
+            self.p1.pos -= abs(self.distance)/2+0.3
+            self.p2.pos += abs(self.distance)/2+0.3
+        self.distance = abs(self.p1.pos)+abs(self.p2.pos)
+        if not action1[0].lower() in self.normal_moves:
+            attack1 = Attack(self.p1, self.distance, self.p1.weapon, action1[0], action1[1])
+        if not action2[0].lower() in self.normal_moves:
+            attack2 = Attack(self.p2, self.distance, self.p2.weapon, action2[0], action2[1])
         if not attack1 == None and not self.p1.isDead():
             defense2 = Defense(self.p2, self.p2.weapon, self.p2.stance, attack1)
             result1 = await self.resolveAttack(attack1, defense2, self.p1, self.p2)
@@ -619,26 +694,20 @@ class Conversation:
             if not amount.isdigit() or int(amount) < 1:
                 return await self.rpg.bot.send_message(self.channel, "That's not a valid amount.")
             itemname = " ".join(choice.split(" ")[2:])
-            item = None
-            for x in items:
-                if items[x]["name"] == itemname.lower():
-                    item = items[x]
-                    break
-            if item == None:
-                return await self.rpg.bot.send_message(self.channel, "There is no such item.")
-            print(itemname)
-            if self.talker.isPlayer:
-                return await self.rpg.bot.send_message(self.channel, "This player isn't buying any items.")
-            if not item.itemID in self.talker.buying:
-                return await self.rpg.bot.send_message(self.channel, "This player isn't interested in that.")
-            if self.talker.balance() < self.talker.buying[item.itemID]*int(amount):
-                return await self.rpg.bot.send_message(self.channel, "{} can't afford that much.".format(self.talker.name))
             for index, item in enumerate(self.listener.inv):
                 if item.name.lower() == itemname.lower():
                     if item.amount < int(amount):
                         return await self.rpg.bot.send_message(self.channel, "You don't have enough items for that.")
-                        self.rpg.removeItem(self.talker.inv, Item("coin"), amount=self.talker.buying[itemname]*int(amount))
-                        self.rpg.removeItem(self.listener.inv, item, amount=int(amount))
+                    if self.talker.isPlayer:
+                        return await self.rpg.bot.send_message(self.channel, "This player isn't buying any items.")
+                    if not item.itemID in self.talker.buying:
+                        return await self.rpg.bot.send_message(self.channel, "This player isn't interested in that.")
+                    if self.talker.balance() < self.talker.buying[item.itemID]*int(amount):
+                        return await self.rpg.bot.send_message(self.channel, "{} can't afford that much.".format(self.talker.name))
+                    await self.rpg.removeItem(self.talker.inv, Item("coin"), amount=self.talker.buying[item.itemID]*int(amount))
+                    await self.rpg.addItem(self.talker.inv, item, amount=int(amount))
+                    await self.rpg.addItem(self.listener.inv, Item('coin'), amount=self.talker.buying[item.itemID]*int(amount))
+                    await self.rpg.removeItem(self.listener.inv, item, amount=int(amount))
                     return await self.rpg.bot.send_message(self.channel, "{} sold {} {} to {}.".format(self.listener.name, amount, uppercase(itemname), self.talker.name))
             return await self.rpg.bot.send_message(self.channel, "You don't have that item.")
         if choice.lower().startswith("buy"):
@@ -660,8 +729,10 @@ class Conversation:
                 if item.name.lower() == itemname.lower():
                     if item.amount < int(amount):
                         return await self.rpg.bot.send_message(self.channel, "{} doesn't have enough items for that.".format(self.talker.name))
-                        self.rpg.removeItem(self.listener.inv, Item("coin"), amount=self.listener.selling[itemname]*int(amount))
-                        self.rpg.removeItem(self.talker.inv, item, amount=int(amount))
+                    await self.rpg.removeItem(self.listener.inv, Item("coin"), amount=self.listener.selling[item.itemID]*int(amount))
+                    await self.rpg.addItem(self.talker.inv, Item("coin"), amount=self.listener.selling[item.itemID]*int(amount))
+                    await self.rpg.addItem(self.listener.inv, item, amount=int(amount))
+                    await self.rpg.removeItem(self.talker.inv, item, amount=int(amount))
                     return await self.rpg.bot.send_message(self.channel, "{} sold {} {} to {}.".format(self.talker.name, amount, uppercase(itemname), self.listener.name))
             return await self.rpg.bot.send_message(self.channel, "{} doesn't have that item.".format(self.talker.name))
 
@@ -673,7 +744,6 @@ class Conversation:
             await self.processDialogue()
         if self.state == "shop":
             await self.processShop()
-        await self.rpg.bot.edit_message(self.message, embed=self.updatemsg())
         self.firstTurn = False
         if self.p1.name == self.listener.name:
             self.p1 = self.listener
@@ -681,6 +751,9 @@ class Conversation:
         else:
             self.p2 = self.listener
             self.p1 = self.talker
+        self.p1.update()
+        self.p2.update()
+        await self.rpg.bot.edit_message(self.message, embed=self.updatemsg())
         if self.over:
             await self.rpg.bot.send_message(self.channel, "Ended conversation.")
             return [self.p1, self.p2]
@@ -714,7 +787,7 @@ class ChillRPG:
         ginger = fileIO("data/crpg/ginger.json", "load")
         ginger = Player(ginger, isPlayer=False)
         self.players[ginger.ID] = ginger
-        ginger.inv = [Item("bread_chunk", {"amount":250}), Item("clean_bandage", {"amount":750})]
+        ginger.inv = [Item("bread_chunk", {"amount":250}), Item("clean_bandage", {"amount":750}), Item("coin", {"amount":20000})]
         ginger.save()
         print(ginger.name)
         for x in self.players:
@@ -732,21 +805,21 @@ class ChillRPG:
             return
         del(self.players[ID])
 
-    async def addItem(self, inv, item):
+    async def addItem(self, inv, item, amount=1):
         for x in inv:
             if x.itemID == item.itemID:
-                x.amount += item.amount
+                x.amount += amount
                 return inv
         inv.append(item)
         return inv
 
     async def removeItem(self, inv, item, amount=1):
+        print(item.itemID)
         for x in inv:
             if x.itemID == item.itemID:
                 x.amount -= amount
                 if x.amount <= 0:
-                    del(x)
-                    return inv
+                    inv.remove(x)
         return inv
 
     async def getPlayer(self, ID, ctx, someone_else=False): #Get a user's character, if it exists
@@ -882,7 +955,8 @@ class ChillRPG:
             player = await self.getPlayer(x, ctx)
             content += "{}\n".format(player.name)
         return content
-    def listArr(self, arr, numbered=False):
+
+    def listArr(self, arr, numbered=False, upper=False):
         content = ""
         i = 0
         marker = ""
@@ -890,6 +964,8 @@ class ChillRPG:
             if numbered:
                 i += 1
                 marker = str(i)+". "
+            if upper:
+                x = uppercase(x)
             content += "\n"+marker+x
         return content
 
@@ -907,7 +983,10 @@ class ChillRPG:
     @commands.command(pass_context=True)
     async def fight(self, ctx):
         player1 = await self.getPlayer(ctx.message.author.id, ctx)
-        player2 = await self.getPlayer(ctx.message.mentions[0].id, ctx, someone_else=True)
+        if len(ctx.message.mentions) > 0:
+            player2 = await self.getPlayer(ctx.message.mentions[0].id, ctx, someone_else=True)
+        else:
+            player2 = await self.getPlayer(" ".join(ctx.message.content.split(" ")[1:]), ctx, someone_else=True)
         if player2 == None:
             return
         fight = Fight(player1, player2, self, ctx.message.channel)
@@ -1058,6 +1137,7 @@ class ChillRPG:
                 await self.bot.send_message(ctx.message.channel, "Cancelled character recreation.")
                 return
         player = await self.newPlayer(ctx.message.author, ctx.message.channel)
+        player.update()
         await self.bot.send_message(ctx.message.channel, embed=self.statusEmbed(player))
         player.save()
 

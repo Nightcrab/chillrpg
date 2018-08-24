@@ -3,7 +3,7 @@
 	"type":"sword",
 	"length":0.9,
 	"mass": 1.1,
-	"balance":50,
+	"balance":0.3,
 	"description": "A one-handed steel sword. Probably best used with some type of shield or buckler in the opposite hand. It's decently balanced and makes for an appropriate sidearm or weapon of self defense.",
 	"blade": {
 		"mass": 0.9,

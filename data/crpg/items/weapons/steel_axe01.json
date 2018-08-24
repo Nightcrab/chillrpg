@@ -4,7 +4,7 @@
 	"bladed":true,
 	"length":1.1,
 	"mass": 1.13,
-	"balance":20,
+	"balance":0.85,
 	"description": "A tree-feller's axe. Not easy to swing around but packs a punch.",
 	"blade": {
 		"mass": 0.8,

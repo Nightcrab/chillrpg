@@ -4,7 +4,7 @@
 	"bladed":true,
 	"length":2.5,
 	"mass": 2.3,
-	"balance":15,
+	"balance":0.75,
 	"blade": {
 		"mass": 1.4,
 		"stab": {

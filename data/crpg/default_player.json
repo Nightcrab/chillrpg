@@ -26,7 +26,8 @@
 	"selling" : {},
 	"combat_stats": {
 		"reactionspeed" : 0.5,
-		"reflex_speed": 1.5
+		"arm_speed": 1.5,
+		"wrist_speed":80
 	},
 	"skills" : {
 		"one_handed_sword" : 0,
